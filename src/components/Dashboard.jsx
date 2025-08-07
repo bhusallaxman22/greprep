@@ -11,14 +11,29 @@ import {
   LinearProgress,
   Alert,
   CircularProgress,
-  Paper
+  Paper,
+  Divider,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import {
   TrendingUp,
   Assessment,
   Quiz,
   School,
-  Timeline
+  Timeline,
+  ExpandMore,
+  Lightbulb,
+  FlagOutlined,
+  Schedule,
+  BookmarkBorder,
+  Psychology,
+  TipsAndUpdates
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import firebaseService from '../services/firebase';
@@ -56,6 +71,10 @@ const Dashboard = ({ onStartTest }) => {
         } finally {
           setLoadingAI(false);
         }
+      } else {
+        // Generate quick insights for new users
+        const insights = openRouterService.generateQuickInsights(userStats);
+        setAiEvaluation(insights.join('\n\n'));
       }
     } catch (err) {
       console.error('Error loading dashboard data:', err);
@@ -80,6 +99,151 @@ const Dashboard = ({ onStartTest }) => {
     if (trend > 0) return <TrendingUp color="success" />;
     if (trend < 0) return <TrendingUp color="error" sx={{ transform: 'rotate(180deg)' }} />;
     return <Timeline color="action" />;
+  };
+
+  // Parse and render AI evaluation with beautiful formatting
+  const renderAIEvaluation = (evaluation) => {
+    // Check if it's a simple insight or structured analysis
+    if (evaluation.includes('🎯') || evaluation.includes('📈') || evaluation.includes('🔄')) {
+      // Simple insights format
+      const insights = evaluation.split('\n\n').filter(insight => insight.trim());
+      return (
+        <Grid container spacing={2}>
+          {insights.map((insight, index) => (
+            <Grid item xs={12} md={6} key={index}>
+              <Card variant="outlined" sx={{ p: 2, height: '100%' }}>
+                <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
+                  {insight.trim()}
+                </Typography>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      );
+    }
+
+    // Split the evaluation into sections based on common patterns
+    const sections = evaluation.split(/(?=\*\*|📚|🎯|📖|⚡|\d+\.|##|###)/);
+    
+    return (
+      <Box>
+        {sections.map((section, index) => {
+          const trimmedSection = section.trim();
+          if (!trimmedSection) return null;
+
+          // Key Insights Section
+          if (trimmedSection.includes('Key Insights') || trimmedSection.includes('insights')) {
+            return (
+              <Box key={index} sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <Lightbulb color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="primary">Key Insights</Typography>
+                </Box>
+                <Typography variant="body1" sx={{ mb: 2, lineHeight: 1.6 }}>
+                  {trimmedSection.replace(/\*\*Key Insights\*\*:?/i, '').trim()}
+                </Typography>
+                <Divider sx={{ mb: 2 }} />
+              </Box>
+            );
+          }
+
+          // Priority Actions Section
+          if (trimmedSection.includes('Priority Actions') || trimmedSection.includes('focus')) {
+            return (
+              <Box key={index} sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <FlagOutlined color="secondary" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="secondary">Priority Actions</Typography>
+                </Box>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body1">
+                    {trimmedSection.replace(/\*\*Priority Actions\*\*:?/i, '').trim()}
+                  </Typography>
+                </Alert>
+                <Divider sx={{ mb: 2 }} />
+              </Box>
+            );
+          }
+
+          // Study Plan Section
+          if (trimmedSection.includes('Study Plan') || trimmedSection.includes('study')) {
+            const planItems = trimmedSection.split(/[-•]/);
+            return (
+              <Box key={index} sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <BookmarkBorder color="success" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="success.main">Study Plan</Typography>
+                </Box>
+                <List dense>
+                  {planItems.slice(1).map((item, i) => (
+                    <ListItem key={i}>
+                      <ListItemIcon>
+                        <Box sx={{ 
+                          width: 8, 
+                          height: 8, 
+                          borderRadius: '50%', 
+                          bgcolor: 'success.main' 
+                        }} />
+                      </ListItemIcon>
+                      <ListItemText primary={item.trim()} />
+                    </ListItem>
+                  ))}
+                </List>
+                <Divider sx={{ mb: 2 }} />
+              </Box>
+            );
+          }
+
+          // Test-Taking Strategy Section
+          if (trimmedSection.includes('Strategy') || trimmedSection.includes('test-taking')) {
+            return (
+              <Box key={index} sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <Psychology color="warning" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="warning.main">Test-Taking Strategy</Typography>
+                </Box>
+                <Card variant="outlined" sx={{ bgcolor: 'warning.50', p: 2 }}>
+                  <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
+                    {trimmedSection.replace(/\*\*.*Strategy\*\*:?/i, '').trim()}
+                  </Typography>
+                </Card>
+                <Divider sx={{ mb: 2 }} />
+              </Box>
+            );
+          }
+
+          // Motivation Section
+          if (trimmedSection.includes('Motivation') || trimmedSection.includes('encouraging')) {
+            return (
+              <Box key={index} sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <TipsAndUpdates color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="primary">Motivation & Goals</Typography>
+                </Box>
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                    {trimmedSection.replace(/\*\*Motivation\*\*:?/i, '').trim()}
+                  </Typography>
+                </Alert>
+              </Box>
+            );
+          }
+
+          // Default section rendering
+          if (trimmedSection.length > 20) {
+            return (
+              <Box key={index} sx={{ mb: 2 }}>
+                <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
+                  {trimmedSection}
+                </Typography>
+              </Box>
+            );
+          }
+
+          return null;
+        })}
+      </Box>
+    );
   };
 
   if (error) {
@@ -112,6 +276,28 @@ const Dashboard = ({ onStartTest }) => {
           Track your progress and improve your test performance
         </Typography>
       </Box>
+
+      {/* Quick Insights */}
+      {stats && !loadingStats && (
+        <Box sx={{ mb: 4 }}>
+          <Alert 
+            icon={<TipsAndUpdates />} 
+            severity="info" 
+            sx={{ 
+              bgcolor: 'primary.50', 
+              border: '1px solid',
+              borderColor: 'primary.200'
+            }}
+          >
+            <Typography variant="h6" gutterBottom>
+              Quick Insight
+            </Typography>
+            <Typography variant="body1">
+              {openRouterService.generateQuickInsights(stats)[0] || "Keep practicing to improve your performance!"}
+            </Typography>
+          </Alert>
+        </Box>
+      )}
 
       {/* Quick Stats */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -301,9 +487,17 @@ const Dashboard = ({ onStartTest }) => {
         {/* AI Evaluation */}
         <Grid item xs={12}>
           <Paper elevation={2} sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom>
-              AI Performance Analysis
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+              <Psychology color="primary" sx={{ mr: 2, fontSize: 32 }} />
+              <Box>
+                <Typography variant="h5" gutterBottom>
+                  AI Performance Analysis
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Personalized insights powered by AI
+                </Typography>
+              </Box>
+            </Box>
             {loadingAI ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
                 <CircularProgress size={32} sx={{ mr: 2 }} />
@@ -312,17 +506,30 @@ const Dashboard = ({ onStartTest }) => {
                 </Typography>
               </Box>
             ) : aiEvaluation ? (
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-                {aiEvaluation}
-              </Typography>
+              <Box sx={{ mt: 2 }}>
+                {renderAIEvaluation(aiEvaluation)}
+              </Box>
             ) : stats && stats.totalTests > 0 ? (
-              <Typography color="text.secondary">
-                AI evaluation will appear here after your first test.
-              </Typography>
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Psychology sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+                <Typography color="text.secondary" variant="h6">
+                  AI evaluation will appear here after your first test.
+                </Typography>
+              </Box>
             ) : (
-              <Typography color="text.secondary">
-                Take a test to get personalized AI-powered improvement suggestions.
-              </Typography>
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <TipsAndUpdates sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+                <Typography color="text.secondary" variant="h6" gutterBottom>
+                  Take a test to get personalized AI-powered improvement suggestions.
+                </Typography>
+                <Button 
+                  variant="outlined" 
+                  onClick={onStartTest}
+                  sx={{ mt: 2 }}
+                >
+                  Start Your First Test
+                </Button>
+              </Box>
             )}
           </Paper>
         </Grid>

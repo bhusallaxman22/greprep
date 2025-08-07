@@ -190,9 +190,10 @@ class OpenRouterService {
     retryCount = 0
   ) {
     const models = [
-      "deepseek/deepseek-r1-0528:free",
-      "openai/gpt-3.5-turbo",
-      "anthropic/claude-3.5-haiku",
+      "google/gemma-3-4b-it",
+      "mistralai/mistral-small-3.1-24b-instruct",
+      "google/gemini-2.5-flash-lite",
+      "openai/gpt-oss-20b",
       "meta-llama/llama-3.1-8b-instruct:free",
     ];
 
@@ -310,21 +311,98 @@ class OpenRouterService {
   }
 
   async evaluatePerformance(testResults, retryCount = 0) {
-    const prompt = `Analyze the following test performance data and provide personalized improvement suggestions:
+    // Extract meaningful patterns from the test data
+    const recentTests = testResults.slice(0, 5); // Last 5 tests
+    const totalQuestions = testResults.length;
+    const correctAnswers = testResults.filter((q) => q.isCorrect).length;
+    const accuracy =
+      totalQuestions > 0
+        ? Math.round((correctAnswers / totalQuestions) * 100)
+        : 0;
 
-    Test Results: ${JSON.stringify(testResults, null, 2)}
+    // Analyze patterns
+    const sectionPerformance = {};
+    const difficultyPerformance = {};
 
-    Please provide:
-    1. Overall performance assessment
-    2. Strengths and weaknesses by section
-    3. Specific study recommendations
-    4. Target areas for improvement
-    5. Estimated time to improve weak areas
+    testResults.forEach((result) => {
+      // Section analysis
+      if (!sectionPerformance[result.section]) {
+        sectionPerformance[result.section] = {
+          correct: 0,
+          total: 0,
+          avgTime: 0,
+        };
+      }
+      sectionPerformance[result.section].total++;
+      if (result.isCorrect) sectionPerformance[result.section].correct++;
+      sectionPerformance[result.section].avgTime += result.timeSpent || 0;
 
-    Return your analysis in a structured format that's easy to display in a dashboard.`;
+      // Difficulty analysis
+      if (!difficultyPerformance[result.difficulty]) {
+        difficultyPerformance[result.difficulty] = { correct: 0, total: 0 };
+      }
+      difficultyPerformance[result.difficulty].total++;
+      if (result.isCorrect) difficultyPerformance[result.difficulty].correct++;
+    });
+
+    // Calculate averages and trends
+    Object.keys(sectionPerformance).forEach((section) => {
+      const data = sectionPerformance[section];
+      data.accuracy = Math.round((data.correct / data.total) * 100);
+      data.avgTime = Math.round(data.avgTime / data.total);
+    });
+
+    const prompt = `As an expert test prep tutor, analyze this student's performance data and provide specific, actionable insights:
+
+PERFORMANCE DATA:
+- Total Questions: ${totalQuestions}
+- Overall Accuracy: ${accuracy}%
+- Test Type: ${testResults[0]?.testType || "Unknown"}
+
+SECTION BREAKDOWN:
+${Object.entries(sectionPerformance)
+  .map(
+    ([section, data]) =>
+      `${section}: ${data.accuracy}% accuracy (${data.correct}/${data.total}), avg ${data.avgTime}s per question`
+  )
+  .join("\n")}
+
+DIFFICULTY BREAKDOWN:
+${Object.entries(difficultyPerformance)
+  .map(
+    ([difficulty, data]) =>
+      `${difficulty}: ${Math.round(
+        (data.correct / data.total) * 100
+      )}% accuracy (${data.correct}/${data.total})`
+  )
+  .join("\n")}
+
+RECENT PERFORMANCE TREND:
+${recentTests
+  .map(
+    (test, i) =>
+      `Test ${i + 1}: ${test.isCorrect ? "✓" : "✗"} ${test.section} (${
+        test.difficulty
+      }) - ${test.timeSpent || 0}s`
+  )
+  .join("\n")}
+
+Please provide a concise, personalized analysis focusing on:
+
+1. **Key Insights**: What specific patterns do you see? What's the student doing well vs struggling with?
+
+2. **Priority Actions**: What should they focus on FIRST to get the biggest improvement?
+
+3. **Specific Study Plan**: Give 3-4 concrete, actionable steps they can take this week.
+
+4. **Test-Taking Strategy**: Any specific advice for timing, question approach, or test day tactics?
+
+5. **Motivation**: One encouraging insight and realistic expectation for improvement.
+
+Keep it concise (under 300 words), specific to their data, and immediately actionable. Avoid generic advice.`;
 
     const data = {
-      model: "deepseek/deepseek-r1-0528:free",
+      model: "google/gemma-3-4b-it",
       messages: [
         {
           role: "user",
@@ -354,14 +432,41 @@ class OpenRouterService {
   }
 
   async getStudyRecommendations(weakAreas, testType, retryCount = 0) {
-    const prompt = `Based on weak areas in ${testType}: ${weakAreas.join(
+    const prompt = `As a ${testType} test prep expert, provide specific, actionable study recommendations for a student struggling with: ${weakAreas.join(
       ", "
-    )}, 
-    provide specific study recommendations, practice strategies, and resource suggestions.
-    Keep recommendations practical and actionable.`;
+    )}
+
+Create a focused 2-week study plan with:
+
+📚 **Week 1 Focus:**
+- Day-by-day breakdown of what to study
+- Specific practice problems or question types to target
+- Time allocation (e.g., "30 min daily on X, 15 min on Y")
+
+📚 **Week 2 Focus:**  
+- How to build on Week 1
+- Practice test strategy
+- Review and reinforcement activities
+
+🎯 **Daily Study Routine:**
+- Morning warm-up (10-15 min)
+- Focused practice session (30-45 min)  
+- Evening review (10-15 min)
+
+📖 **Specific Resources:**
+- Recommend specific free online resources, apps, or study materials
+- Practice problem sources
+- YouTube channels or websites for these specific weak areas
+
+⚡ **Quick Wins:**
+- 3 immediate tactics they can use to improve these areas
+- Common mistakes to avoid
+- Test-day strategies
+
+Keep recommendations specific to ${testType} format and these exact weak areas. Avoid generic advice.`;
 
     const data = {
-      model: "deepseek/deepseek-r1-0528:free",
+      model: "google/gemma-3-4b-it",
       messages: [
         {
           role: "user",
@@ -392,6 +497,78 @@ class OpenRouterService {
 
       return "Study recommendations are temporarily unavailable. Please try again later.";
     }
+  }
+
+  // Generate quick performance insights for dashboard
+  generateQuickInsights(stats) {
+    const insights = [];
+
+    if (stats.totalTests === 0) {
+      return ["Take your first practice test to get personalized insights!"];
+    }
+
+    // Accuracy insights
+    if (stats.overallAccuracy >= 85) {
+      insights.push(
+        "🎯 Excellent accuracy! Focus on speed and advanced concepts."
+      );
+    } else if (stats.overallAccuracy >= 70) {
+      insights.push(
+        "📈 Good progress! Work on consistency across all sections."
+      );
+    } else if (stats.overallAccuracy >= 50) {
+      insights.push(
+        "🔄 Solid foundation. Focus on your weakest section for quick gains."
+      );
+    } else {
+      insights.push(
+        "🎯 Review fundamentals first, then build speed gradually."
+      );
+    }
+
+    // Section-specific insights
+    const sections = Object.keys(stats.sectionBreakdown);
+    if (sections.length > 1) {
+      const sectionAccuracies = sections.map((section) => ({
+        section,
+        accuracy: stats.sectionBreakdown[section].accuracy,
+      }));
+
+      const bestSection = sectionAccuracies.reduce((a, b) =>
+        a.accuracy > b.accuracy ? a : b
+      );
+      const worstSection = sectionAccuracies.reduce((a, b) =>
+        a.accuracy < b.accuracy ? a : b
+      );
+
+      if (bestSection.accuracy - worstSection.accuracy > 20) {
+        insights.push(
+          `💪 Strong in ${bestSection.section}! Apply those skills to improve ${worstSection.section}.`
+        );
+      }
+    }
+
+    // Trend insights
+    if (stats.improvementTrend > 10) {
+      insights.push("🚀 Great momentum! Keep up your current study routine.");
+    } else if (stats.improvementTrend < -10) {
+      insights.push(
+        "🔄 Time to adjust your study strategy. Focus on fundamentals."
+      );
+    }
+
+    // Frequency insights
+    if (stats.totalTests >= 10) {
+      insights.push(
+        "📊 Good practice frequency! Consider taking full-length practice tests."
+      );
+    } else if (stats.totalTests >= 5) {
+      insights.push(
+        "📈 Building consistency! Take more practice questions daily."
+      );
+    }
+
+    return insights.slice(0, 3); // Return top 3 insights
   }
 }
 
