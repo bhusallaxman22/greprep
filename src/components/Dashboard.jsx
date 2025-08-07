@@ -40,13 +40,14 @@ import firebaseService from '../services/firebase';
 import openRouterService from '../services/openrouter';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const Dashboard = ({ onStartTest }) => {
+const Dashboard = ({ onStartTest, onStartLearning }) => {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [aiEvaluation, setAiEvaluation] = useState('');
   const [loadingStats, setLoadingStats] = useState(true);
   const [loadingAI, setLoadingAI] = useState(false);
   const [error, setError] = useState('');
+  const [aiInsightsExpanded, setAiInsightsExpanded] = useState(true);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -385,12 +386,13 @@ const Dashboard = ({ onStartTest }) => {
         </Grid>
       </Grid>
 
-      {/* Start New Test Button */}
-      <Box sx={{ mb: 4, textAlign: 'center' }}>
+      {/* Start New Test and Learning Buttons */}
+      <Box sx={{ mb: 4, textAlign: 'center', display: 'flex', gap: 2, justifyContent: 'center' }}>
         <Button
           variant="contained"
           size="large"
           onClick={onStartTest}
+          startIcon={<Quiz />}
           sx={{ 
             py: 2, 
             px: 4, 
@@ -400,6 +402,28 @@ const Dashboard = ({ onStartTest }) => {
           }}
         >
           Start New Test
+        </Button>
+        <Button
+          variant="outlined"
+          size="large"
+          onClick={onStartLearning}
+          startIcon={<School />}
+          sx={{ 
+            py: 2, 
+            px: 4, 
+            fontSize: '1.2rem',
+            borderRadius: 2,
+            boxShadow: 3,
+            background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
+            color: 'white',
+            border: 'none',
+            '&:hover': {
+              background: 'linear-gradient(45deg, #1976D2 30%, #0288D1 90%)',
+              border: 'none',
+            }
+          }}
+        >
+          Start Learning
         </Button>
       </Box>
 
@@ -486,52 +510,64 @@ const Dashboard = ({ onStartTest }) => {
 
         {/* AI Evaluation */}
         <Grid item xs={12}>
-          <Paper elevation={2} sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-              <Psychology color="primary" sx={{ mr: 2, fontSize: 32 }} />
-              <Box>
-                <Typography variant="h5" gutterBottom>
-                  AI Performance Analysis
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Personalized insights powered by AI
-                </Typography>
+          <Accordion 
+            expanded={aiInsightsExpanded} 
+            onChange={(event, isExpanded) => setAiInsightsExpanded(isExpanded)}
+            elevation={2}
+          >
+            <AccordionSummary
+              expandIcon={<ExpandMore />}
+              aria-controls="ai-insights-content"
+              id="ai-insights-header"
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Psychology color="primary" sx={{ mr: 2, fontSize: 32 }} />
+                <Box>
+                  <Typography variant="h5">
+                    AI Performance Analysis
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Personalized insights powered by AI
+                  </Typography>
+                </Box>
               </Box>
-            </Box>
-            {loadingAI ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
-                <CircularProgress size={32} sx={{ mr: 2 }} />
-                <Typography color="text.secondary">
-                  Analyzing your performance...
-                </Typography>
-              </Box>
-            ) : aiEvaluation ? (
-              <Box sx={{ mt: 2 }}>
-                {renderAIEvaluation(aiEvaluation)}
-              </Box>
-            ) : stats && stats.totalTests > 0 ? (
-              <Box sx={{ textAlign: 'center', py: 4 }}>
-                <Psychology sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
-                <Typography color="text.secondary" variant="h6">
-                  AI evaluation will appear here after your first test.
-                </Typography>
-              </Box>
-            ) : (
-              <Box sx={{ textAlign: 'center', py: 4 }}>
-                <TipsAndUpdates sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-                <Typography color="text.secondary" variant="h6" gutterBottom>
-                  Take a test to get personalized AI-powered improvement suggestions.
-                </Typography>
-                <Button 
-                  variant="outlined" 
-                  onClick={onStartTest}
-                  sx={{ mt: 2 }}
-                >
-                  Start Your First Test
-                </Button>
-              </Box>
-            )}
-          </Paper>
+            </AccordionSummary>
+            <AccordionDetails>
+              {loadingAI ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
+                  <CircularProgress size={32} sx={{ mr: 2 }} />
+                  <Typography color="text.secondary">
+                    Analyzing your performance...
+                  </Typography>
+                </Box>
+              ) : aiEvaluation ? (
+                <Box sx={{ mt: 2 }}>
+                  {renderAIEvaluation(aiEvaluation)}
+                </Box>
+              ) : stats && stats.totalTests > 0 ? (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Psychology sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+                  <Typography color="text.secondary" variant="h6">
+                    AI evaluation will appear here after your first test.
+                  </Typography>
+                </Box>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <TipsAndUpdates sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+                  <Typography color="text.secondary" variant="h6" gutterBottom>
+                    Take a test to get personalized AI-powered improvement suggestions.
+                  </Typography>
+                  <Button 
+                    variant="outlined" 
+                    onClick={onStartTest}
+                    sx={{ mt: 2 }}
+                  >
+                    Start Your First Test
+                  </Button>
+                </Box>
+              )}
+            </AccordionDetails>
+          </Accordion>
         </Grid>
 
         {/* Recent Performance */}

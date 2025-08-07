@@ -11,6 +11,7 @@ import QuestionDisplay from './components/QuestionDisplay';
 import TestResults from './components/TestResults';
 import AuthScreen from './components/AuthScreen';
 import UserProfile from './components/UserProfile';
+import LearningModule from './components/LearningModule';
 import firebaseService from './services/firebase';
 import openRouterService from './services/openrouter';
 
@@ -68,6 +69,7 @@ const APP_STATES = {
   TEST_SELECTION: 'test_selection',
   TEST_IN_PROGRESS: 'test_in_progress',
   TEST_RESULTS: 'test_results',
+  LEARNING: 'learning',
 };
 
 function AppContent() {
@@ -94,6 +96,10 @@ function AppContent() {
 
   const startTestSelection = () => {
     setAppState(APP_STATES.TEST_SELECTION);
+  };
+
+  const startLearning = () => {
+    setAppState(APP_STATES.LEARNING);
   };
 
   const startTest = async (config) => {
@@ -254,7 +260,10 @@ function AppContent() {
           ) : (
             <>
               {appState === APP_STATES.DASHBOARD && (
-                <Dashboard onStartTest={startTestSelection} />
+                <Dashboard 
+                  onStartTest={startTestSelection} 
+                  onStartLearning={startLearning}
+                />
               )}
 
               {appState === APP_STATES.TEST_SELECTION && (
@@ -283,6 +292,12 @@ function AppContent() {
                   testResult={testResult}
                   onReturnToDashboard={returnToDashboard}
                   onRetakeTest={retakeTest}
+                />
+              )}
+
+              {appState === APP_STATES.LEARNING && (
+                <LearningModule
+                  onBack={returnToDashboard}
                 />
               )}
             </>

@@ -570,6 +570,181 @@ Keep recommendations specific to ${testType} format and these exact weak areas. 
 
     return insights.slice(0, 3); // Return top 3 insights
   }
+
+  // Generate interactive lesson content
+  async generateLesson(moduleId, userLevel, retryCount = 0) {
+    const lessonPrompts = {
+      "vocabulary-basics": `Create an interactive vocabulary lesson for level ${userLevel} students. Include:
+        - 5 multiple-choice questions testing vocabulary in context
+        - Words commonly seen on GRE/GMAT tests
+        - Engaging explanations with memory techniques
+        - Difficulty appropriate for level ${userLevel}`,
+
+      "reading-strategies": `Create a reading comprehension lesson with:
+        - A short passage (150-200 words)
+        - 4 questions testing different reading skills
+        - Strategy tips for each question type
+        - Level ${userLevel} difficulty`,
+
+      "math-foundations": `Create a math fundamentals lesson with:
+        - 5 step-by-step problems
+        - Clear explanations of mathematical concepts
+        - Visual problem-solving techniques
+        - Level ${userLevel} appropriate difficulty`,
+
+      "critical-reasoning": `Create a critical reasoning lesson with:
+        - 4 logical reasoning problems
+        - Different argument types (strengthen, weaken, assumption)
+        - Clear explanation of logical structures
+        - Level ${userLevel} complexity`,
+    };
+
+    const prompt = `${
+      lessonPrompts[moduleId] || lessonPrompts["vocabulary-basics"]
+    }
+
+IMPORTANT: Return ONLY a valid JSON object with this structure:
+{
+  "id": "${moduleId}-lesson-${Date.now()}",
+  "title": "Engaging Lesson Title",
+  "description": "Brief lesson description",
+  "questions": [
+    {
+      "question": "Question text with context",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswer": 0,
+      "explanation": "Detailed explanation with learning tips"
+    }
+  ],
+  "tips": ["Study tip 1", "Study tip 2"],
+  "nextSteps": "What to practice next"
+}
+
+Make it engaging, educational, and fun like Duolingo!`;
+
+    const data = {
+      model: "google/gemma-3-4b-it",
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 2000,
+    };
+
+    try {
+      const response = await this.makeRequest("/chat/completions", data);
+      const content = response.choices[0].message.content;
+
+      // Parse lesson content
+      let lesson = null;
+      try {
+        lesson = JSON.parse(content.trim());
+      } catch {
+        // Try regex extraction
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          lesson = JSON.parse(jsonMatch[0]);
+        }
+      }
+
+      if (lesson && this.validateLesson(lesson)) {
+        return lesson;
+      } else {
+        throw new Error("Invalid lesson structure");
+      }
+    } catch (error) {
+      console.error(
+        `Failed to generate lesson (attempt ${retryCount + 1}):`,
+        error
+      );
+
+      if (retryCount < this.maxRetries) {
+        await this.delay(this.calculateDelay(retryCount));
+        return this.generateLesson(moduleId, userLevel, retryCount + 1);
+      }
+
+      // Return fallback lesson
+      return this.getFallbackLesson(moduleId);
+    }
+  }
+
+  // Validate lesson structure
+  validateLesson(lesson) {
+    return (
+      lesson &&
+      typeof lesson.title === "string" &&
+      Array.isArray(lesson.questions) &&
+      lesson.questions.length > 0 &&
+      lesson.questions.every(
+        (q) =>
+          typeof q.question === "string" &&
+          Array.isArray(q.options) &&
+          q.options.length >= 4 &&
+          typeof q.correctAnswer === "number" &&
+          typeof q.explanation === "string"
+      )
+    );
+  }
+
+  // Fallback lesson generator
+  getFallbackLesson(moduleId) {
+    const fallbackLessons = {
+      "vocabulary-basics": {
+        id: `${moduleId}-fallback`,
+        title: "Essential Vocabulary Builder",
+        description: "Master key vocabulary words for test success",
+        questions: [
+          {
+            question:
+              "The professor's lecture was so _____ that many students fell asleep.",
+            options: ["engaging", "tedious", "fascinating", "brief"],
+            correctAnswer: 1,
+            explanation:
+              "Tedious means boring or monotonous, which would cause students to fall asleep.",
+          },
+          {
+            question: "Her _____ nature made her an excellent diplomat.",
+            options: ["hostile", "aggressive", "tactful", "reckless"],
+            correctAnswer: 2,
+            explanation:
+              "Tactful means having diplomacy and sensitivity in dealing with others.",
+          },
+        ],
+        tips: [
+          "Use context clues to determine word meaning",
+          "Look for positive or negative connotations",
+        ],
+        nextSteps: "Practice with more advanced vocabulary in context",
+      },
+      "math-foundations": {
+        id: `${moduleId}-fallback`,
+        title: "Algebraic Problem Solving",
+        description: "Build strong foundation in algebraic thinking",
+        questions: [
+          {
+            question: "If 3x + 7 = 22, what is the value of x?",
+            options: ["3", "5", "7", "15"],
+            correctAnswer: 1,
+            explanation:
+              "Subtract 7 from both sides: 3x = 15. Then divide by 3: x = 5.",
+          },
+          {
+            question: "What is 25% of 80?",
+            options: ["15", "20", "25", "30"],
+            correctAnswer: 1,
+            explanation: "25% = 0.25. So 0.25 × 80 = 20.",
+          },
+        ],
+        tips: ["Work step by step", "Check your answer by substitution"],
+        nextSteps: "Practice more complex algebraic equations",
+      },
+    };
+
+    return fallbackLessons[moduleId] || fallbackLessons["vocabulary-basics"];
+  }
 }
 
 export default new OpenRouterService();

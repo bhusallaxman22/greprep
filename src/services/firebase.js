@@ -2,11 +2,15 @@
 import {
   collection,
   addDoc,
-  getDocs,
   query,
   where,
   orderBy,
+  limit,
+  getDocs,
   serverTimestamp,
+  doc,
+  getDoc,
+  setDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -226,6 +230,83 @@ class FirebaseService {
       return weakAreas.sort((a, b) => a.accuracy - b.accuracy);
     } catch (error) {
       console.error("Error getting weak areas:", error);
+      throw error;
+    }
+  }
+
+  // Learning Progress Methods
+  async getUserLearningProgress(userId) {
+    try {
+      const docRef = doc(db, "learningProgress", userId);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        return docSnap.data();
+      } else {
+        // Return default progress for new users
+        const defaultProgress = {
+          level: 1,
+          xp: 0,
+          streak: 0,
+          completedLessons: 0,
+          achievements: [],
+          lastActivityDate: new Date().toISOString(),
+          moduleProgress: {},
+        };
+
+        // Save default progress
+        await setDoc(docRef, defaultProgress);
+        return defaultProgress;
+      }
+    } catch (error) {
+      console.error("Error getting learning progress:", error);
+      throw error;
+    }
+  }
+
+  async updateLearningProgress(userId, progress) {
+    try {
+      const docRef = doc(db, "learningProgress", userId);
+      progress.lastActivityDate = new Date().toISOString();
+      await setDoc(docRef, progress, { merge: true });
+      return true;
+    } catch (error) {
+      console.error("Error updating learning progress:", error);
+      throw error;
+    }
+  }
+
+  async saveLessonCompletion(userId, lessonData) {
+    try {
+      const docRef = await addDoc(collection(db, "completedLessons"), {
+        userId,
+        ...lessonData,
+        completedAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
+      });
+      return docRef.id;
+    } catch (error) {
+      console.error("Error saving lesson completion:", error);
+      throw error;
+    }
+  }
+
+  async getUserLessonHistory(userId, limit = 10) {
+    try {
+      const q = query(
+        collection(db, "completedLessons"),
+        where("userId", "==", userId),
+        orderBy("completedAt", "desc"),
+        limit(limit)
+      );
+
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+    } catch (error) {
+      console.error("Error getting lesson history:", error);
       throw error;
     }
   }
