@@ -310,6 +310,178 @@ class FirebaseService {
       throw error;
     }
   }
+
+    // Enhanced Learning Methods
+
+    // Get completed modules for a user
+    async getCompletedModules(userId) {
+        try {
+            const q = query(
+                collection(db, 'completedModules'),
+                where('userId', '==', userId),
+                orderBy('completedAt', 'desc')
+            );
+            const querySnapshot = await getDocs(q);
+            return querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+        } catch (error) {
+            console.error('Error getting completed modules:', error);
+            return [];
+        }
+    }
+
+    // Get user scores for all modules
+    async getUserModuleScores(userId) {
+        try {
+            const q = query(
+                collection(db, 'moduleScores'),
+                where('userId', '==', userId)
+            );
+            const querySnapshot = await getDocs(q);
+            const scores = {};
+            querySnapshot.docs.forEach(doc => {
+                const data = doc.data();
+                scores[data.moduleId] = data;
+            });
+            return scores;
+        } catch (error) {
+            console.error('Error getting module scores:', error);
+            return {};
+        }
+    }
+
+    // Get user bookmarked modules
+    async getUserBookmarks(userId) {
+        try {
+            const docRef = doc(db, 'userBookmarks', userId);
+            const docSnap = await getDoc(docRef);
+
+            if (docSnap.exists()) {
+                return docSnap.data().bookmarkedModules || [];
+            } else {
+                return [];
+            }
+        } catch (error) {
+            console.error('Error getting user bookmarks:', error);
+            return [];
+        }
+    }
+
+    // Save module completion
+    async saveModuleCompletion(userId, moduleData) {
+        try {
+            const docRef = await addDoc(collection(db, 'completedModules'), {
+                userId,
+                ...moduleData,
+                completedAt: serverTimestamp(),
+                timestamp: new Date().toISOString()
+            });
+            return docRef.id;
+        } catch (error) {
+            console.error('Error saving module completion:', error);
+            throw error;
+        }
+    }
+
+    // Save module score
+    async saveModuleScore(userId, moduleId, scoreData) {
+        try {
+            const docRef = doc(db, 'moduleScores', `${userId}_${moduleId}`);
+            await setDoc(docRef, {
+                userId,
+                moduleId,
+                ...scoreData,
+                lastUpdated: serverTimestamp(),
+                timestamp: new Date().toISOString()
+            }, { merge: true });
+        } catch (error) {
+            console.error('Error saving module score:', error);
+            throw error;
+        }
+    }
+
+    // Toggle bookmark for a module
+    async toggleModuleBookmark(userId, moduleId) {
+        try {
+            const docRef = doc(db, 'userBookmarks', userId);
+            const docSnap = await getDoc(docRef);
+
+            let bookmarkedModules = [];
+            if (docSnap.exists()) {
+                bookmarkedModules = docSnap.data().bookmarkedModules || [];
+            }
+
+            if (bookmarkedModules.includes(moduleId)) {
+                bookmarkedModules = bookmarkedModules.filter(id => id !== moduleId);
+            } else {
+                bookmarkedModules.push(moduleId);
+            }
+
+            await setDoc(docRef, {
+                userId,
+                bookmarkedModules,
+                lastUpdated: serverTimestamp()
+            });
+
+            return bookmarkedModules;
+        } catch (error) {
+            console.error('Error toggling module bookmark:', error);
+            throw error;
+        }
+    }
+
+    // Save learning session data
+    async saveLearningSession(userId, sessionData) {
+        try {
+            const docRef = await addDoc(collection(db, 'learningSessions'), {
+                userId,
+                ...sessionData,
+                startTime: serverTimestamp(),
+                timestamp: new Date().toISOString()
+            });
+            return docRef.id;
+        } catch (error) {
+            console.error('Error saving learning session:', error);
+            throw error;
+        }
+    }
+
+    // Get user achievements
+    async getUserAchievements(userId) {
+        try {
+            const q = query(
+                collection(db, 'userAchievements'),
+                where('userId', '==', userId),
+                orderBy('earnedAt', 'desc')
+            );
+            const querySnapshot = await getDocs(q);
+            return querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+        } catch (error) {
+            console.error('Error getting user achievements:', error);
+            return [];
+        }
+    }
+
+    // Award achievement to user
+    async awardAchievement(userId, achievementData) {
+        try {
+            const docRef = await addDoc(collection(db, 'userAchievements'), {
+                userId,
+                ...achievementData,
+                earnedAt: serverTimestamp(),
+                timestamp: new Date().toISOString()
+            });
+            return docRef.id;
+        } catch (error) {
+            console.error('Error awarding achievement:', error);
+            throw error;
+        }
+    }
 }
 
 export default new FirebaseService();

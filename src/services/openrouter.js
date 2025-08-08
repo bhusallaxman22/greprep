@@ -60,6 +60,108 @@ class OpenRouterService {
     }
   }
 
+  // Robust JSON cleaning and parsing function
+  cleanAndParseJSON(content) {
+    if (!content || typeof content !== 'string') {
+      throw new Error('Invalid content provided');
+    }
+
+    // Multiple parsing strategies
+    const strategies = [
+      // Strategy 1: Direct parse (cleaned)
+      () => {
+        const cleaned = content.trim()
+          .replace(/^```json\s*/, '')
+          .replace(/```\s*$/, '')
+          .replace(/^[^{]*/, '')
+          .replace(/[^}]*$/, '');
+        return JSON.parse(cleaned);
+      },
+
+      // Strategy 2: Extract JSON block with better regex
+      () => {
+        const jsonMatch = content.match(/\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/);
+        if (!jsonMatch) throw new Error('No JSON found');
+        return JSON.parse(jsonMatch[0]);
+      },
+
+      // Strategy 3: Fix common AI JSON issues
+      () => {
+        let fixed = content
+          .replace(/^.*?({.*}).*$/s, '$1') // Extract JSON object
+          .replace(/[^\x20-\x7E\s]/g, '') // Keep only printable ASCII and whitespace
+          .replace(/\\n/g, '\\\\n') // Fix newlines
+          .replace(/\\"/g, '\\"') // Fix quotes
+          .replace(/(\w+):/g, '"$1":') // Add quotes to keys
+          .replace(/,(\s*[}\]])/g, '$1'); // Remove trailing commas
+        return JSON.parse(fixed);
+      },
+
+      // Strategy 4: Character-by-character cleaning
+      () => {
+        let cleaned = '';
+        let inString = false;
+        let escapeNext = false;
+
+        for (let i = 0; i < content.length; i++) {
+          const char = content[i];
+
+          if (escapeNext) {
+            cleaned += char;
+            escapeNext = false;
+            continue;
+          }
+
+          if (char === '\\') {
+            escapeNext = true;
+            cleaned += char;
+            continue;
+          }
+
+          if (char === '"') {
+            inString = !inString;
+            cleaned += char;
+            continue;
+          }
+
+          if (!inString && (char === '\n' || char === '\r' || char === '\t')) {
+            cleaned += ' '; // Replace with space
+            continue;
+          }
+
+          if (inString && char.charCodeAt(0) < 32) {
+            // Replace control characters in strings
+            cleaned += ' ';
+            continue;
+          }
+
+          cleaned += char;
+        }
+
+        // Extract JSON object
+        const match = cleaned.match(/\{.*\}/s);
+        if (!match) throw new Error('No JSON object found');
+
+        return JSON.parse(match[0]);
+      }
+    ];
+
+    // Try each strategy
+    for (let i = 0; i < strategies.length; i++) {
+      try {
+        const result = strategies[i]();
+        console.log(`JSON parsed successfully with strategy ${i + 1}`);
+        return result;
+      } catch (error) {
+        console.log(`Strategy ${i + 1} failed:`, error.message);
+        if (i === strategies.length - 1) {
+          // Last strategy failed, throw error
+          throw new Error(`All JSON parsing strategies failed. Original content: ${content.substring(0, 200)}...`);
+        }
+      }
+    }
+  }
+
   // Determine if error is retryable
   shouldRetry(error) {
     return (
@@ -190,38 +292,41 @@ class OpenRouterService {
     retryCount = 0
   ) {
     const models = [
+      "anthropic/claude-3.5-sonnet-20241022",
+      "google/gemini-2.5-flash-lite",
       "google/gemma-3-4b-it",
       "mistralai/mistral-small-3.1-24b-instruct",
-      "google/gemini-2.5-flash-lite",
       "openai/gpt-oss-20b",
       "meta-llama/llama-3.1-8b-instruct:free",
     ];
 
     const currentModel = models[Math.min(retryCount, models.length - 1)];
 
-    const prompt = `Generate a ${testType} ${section} question with ${difficulty} difficulty. 
+    const prompt = `You are an expert ${testType} test preparation instructor. Generate ONE high-quality ${section} question with ${difficulty} difficulty level.
 
-    CRITICAL: Return ONLY valid JSON. No extra text, no markdown, no explanations. Just the JSON object.
-    
-    Required JSON format:
-    {
-      "question": "Question text here",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": 0,
-      "explanation": "Explanation text here"
-    }
+CRITICAL: Respond with ONLY a valid JSON object. No explanation, no markdown, no extra text.
 
-    Guidelines:
-    - For Reading Comprehension: Include a "passage" field with 200-300 words
-    - For Math/Visual questions: You may include an "imageDescription" field
-    - Question must be realistic and follow official ${testType} format
-    - All 4 options must be plausible
-    - correctAnswer must be 0, 1, 2, or 3 (array index)
-    - Explanation must be detailed and educational
-    - Do NOT use escape characters unless absolutely necessary
-    - Keep text simple and avoid complex formatting
+Expected JSON structure:
+{
+  "question": "Clear, well-written question text",
+  "options": ["Option A", "Option B", "Option C", "Option D"],
+  "correctAnswer": 0,
+  "explanation": "Detailed explanation of why the answer is correct and others are wrong"
+}
 
-    Return ONLY the JSON object:`;
+Requirements:
+- Question must be realistic and follow official ${testType} format
+- All 4 options must be plausible but only one correct
+- correctAnswer must be 0, 1, 2, or 3 (array index)
+- Explanation must be educational and detailed
+- Use proper grammar and avoid control characters
+- Keep content clean and well-formatted
+
+${section === 'reading' ? 'Include a "passage" field with 200-300 words of engaging content before the question.' : ''}
+${section === 'quantitative' || section === 'math' ? 'Focus on clear mathematical concepts with step-by-step reasoning.' : ''}
+${section === 'verbal' ? 'Focus on vocabulary, grammar, or reasoning skills as appropriate.' : ''}
+
+Generate ONLY the JSON object:`;
 
     const data = {
       model: currentModel,
@@ -239,53 +344,12 @@ class OpenRouterService {
       const response = await this.makeRequest("/chat/completions", data);
       const content = response.choices[0].message.content;
 
-      // Try multiple JSON extraction methods
-      let parsedQuestion = null;
-
-      // Method 1: Direct JSON parse
-      try {
-        parsedQuestion = JSON.parse(content.trim());
-      } catch {
-        // Method 2: Extract JSON with regex
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            parsedQuestion = JSON.parse(jsonMatch[0]);
-          } catch {
-            // Method 3: Clean and extract JSON with better escape handling
-            let cleanedContent = content
-              .replace(/```json\s*/, "")
-              .replace(/```\s*$/, "")
-              .replace(/^[^{]*/, "")
-              .replace(/[^}]*$/, "");
-
-            // Fix common escape character issues
-            cleanedContent = cleanedContent
-              .replace(/\\'/g, "'")  // Fix escaped single quotes
-              .replace(/\\"/g, '"')  // Fix escaped double quotes that shouldn't be escaped
-              .replace(/\\\\/g, "\\") // Fix double backslashes
-              .replace(/\\n/g, "\\n") // Ensure newlines are properly escaped
-              .replace(/\\t/g, "\\t"); // Ensure tabs are properly escaped
-
-            try {
-              parsedQuestion = JSON.parse(cleanedContent);
-            } catch {
-              // Method 4: Try to fix specific JSON issues
-              const fixedContent = cleanedContent
-                .replace(/([{,]\s*)"([^"]*)"(\s*:\s*)"([^"]*(?:\\.[^"]*)*)"/g, '$1"$2"$3"$4"') // Fix quotes in values
-                .replace(/\n/g, '\\n')  // Escape actual newlines
-                .replace(/\r/g, '\\r')  // Escape carriage returns
-                .replace(/\t/g, '\\t'); // Escape tabs
-
-              parsedQuestion = JSON.parse(fixedContent);
-            }
-          }
-        }
-      }
+      // Use robust JSON parsing
+      const parsedQuestion = this.cleanAndParseJSON(content);
 
       // Validate the parsed question
-      if (parsedQuestion && this.validateQuestion(parsedQuestion)) {
-      // Ensure required fields are present and clean up any empty fields
+      if (this.validateQuestion(parsedQuestion)) {
+        // Ensure required fields are present and clean up any empty fields
         parsedQuestion.testType = testType;
         parsedQuestion.section = section;
         parsedQuestion.difficulty = difficulty;
@@ -365,8 +429,7 @@ class OpenRouterService {
     }
 
     // Check that all options are valid strings
-    for (let i = 0; i < question.options.length; i++) {
-      const option = question.options[i];
+    for (const option of question.options) {
       if (typeof option !== "string" || option.trim().length < 1) {
         return false;
       }
@@ -447,36 +510,36 @@ PERFORMANCE DATA:
 
 SECTION BREAKDOWN:
 ${Object.entries(sectionPerformance)
-  .map(
-    ([section, data]) =>
-      `${section}: ${data.accuracy}% accuracy (${data.correct}/${data.total}), avg ${data.avgTime}s per question`
-  )
-  .join("\n")}
+        .map(
+          ([section, data]) =>
+            `${section}: ${data.accuracy}% accuracy (${data.correct}/${data.total}), avg ${data.avgTime}s per question`
+        )
+        .join("\n")}
 
 DIFFICULTY BREAKDOWN:
 ${Object.entries(difficultyPerformance)
-  .map(
-    ([difficulty, data]) =>
-      `${difficulty}: ${Math.round(
-        (data.correct / data.total) * 100
-      )}% accuracy (${data.correct}/${data.total})`
-  )
-  .join("\n")}
+        .map(
+          ([difficulty, data]) =>
+            `${difficulty}: ${Math.round(
+              (data.correct / data.total) * 100
+            )}% accuracy (${data.correct}/${data.total})`
+        )
+        .join("\n")}
 
 RECENT TEST PERFORMANCE:
 ${recentTests
-      .map((test, i) => {
-        const testCorrect = test.questions
-          ? test.questions.filter((q) => q.isCorrect).length
-          : 0;
-        const testTotal = test.questions ? test.questions.length : 0;
-        const testAccuracy =
-          testTotal > 0 ? Math.round((testCorrect / testTotal) * 100) : 0;
-        return `Test ${i + 1
-          }: ${testAccuracy}% accuracy (${testCorrect}/${testTotal}) - ${test.testType
-          } ${test.section}`;
-      })
-  .join("\n")}
+        .map((test, i) => {
+          const testCorrect = test.questions
+            ? test.questions.filter((q) => q.isCorrect).length
+            : 0;
+          const testTotal = test.questions ? test.questions.length : 0;
+          const testAccuracy =
+            testTotal > 0 ? Math.round((testCorrect / testTotal) * 100) : 0;
+          return `Test ${i + 1
+            }: ${testAccuracy}% accuracy (${testCorrect}/${testTotal}) - ${test.testType
+            } ${test.section}`;
+        })
+        .join("\n")}
 
 Please provide a concise, personalized analysis focusing on:
 
@@ -660,6 +723,151 @@ Keep recommendations specific to ${testType} format and these exact weak areas. 
     }
 
     return insights.slice(0, 3); // Return top 3 insights
+  }
+
+  // Generate batch of questions with lazy loading
+  async generateQuestionBatch(moduleId, userLevel, batchSize = 5, startIndex = 0, retryCount = 0) {
+    const prompt = `You are an expert test preparation instructor. Generate exactly ${batchSize} high-quality practice questions for module "${moduleId}" at level ${userLevel}.
+
+CRITICAL: Return ONLY a valid JSON object. No markdown, no explanation, no extra text.
+
+Required JSON structure:
+{
+  "questions": [
+    {
+      "id": ${startIndex + 1},
+      "question": "Clear, well-written question text",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswer": 0,
+      "explanation": "Detailed explanation of why the answer is correct",
+      "concept": "Key concept being tested",
+      "difficulty": "easy|medium|hard"
+    }
+  ]
+}
+
+Generate exactly ${batchSize} questions. Make them engaging and educational. Focus on practical test preparation.`;
+
+    const data = {
+      model: retryCount === 0 ? "anthropic/claude-3.5-sonnet-20241022" : "google/gemini-2.5-flash-lite",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_tokens: 2000,
+    };
+
+    try {
+      const response = await this.makeRequest("/chat/completions", data);
+      const content = response.choices[0].message.content;
+
+      const batch = this.cleanAndParseJSON(content);
+
+      if (batch && batch.questions && Array.isArray(batch.questions)) {
+        // Ensure each question has proper ID
+        batch.questions.forEach((q, index) => {
+          q.id = startIndex + index + 1;
+        });
+        return batch.questions;
+      } else {
+        throw new Error("Invalid batch structure");
+      }
+    } catch (error) {
+      console.error(`Failed to generate question batch (attempt ${retryCount + 1}):`, error);
+
+      if (retryCount < this.maxRetries) {
+        await this.delay(this.calculateDelay(retryCount));
+        return this.generateQuestionBatch(moduleId, userLevel, batchSize, startIndex, retryCount + 1);
+      }
+
+      // Return fallback questions for this batch
+      return this.generateFallbackBatch(moduleId, batchSize, startIndex);
+    }
+  }
+
+  // Generate fallback questions for a batch
+  generateFallbackBatch(moduleId, batchSize, startIndex) {
+    const fallbackQuestions = [];
+
+    for (let i = 0; i < batchSize; i++) {
+      fallbackQuestions.push({
+        id: startIndex + i + 1,
+        question: `Practice question ${startIndex + i + 1} for ${moduleId.replace(/-/g, ' ')}. What is the best approach to solving this type of problem?`,
+        options: [
+          "Read carefully and analyze step by step",
+          "Guess randomly",
+          "Skip difficult parts",
+          "Rush through quickly"
+        ],
+        correctAnswer: 0,
+        explanation: "Taking time to read carefully and analyze step by step is the most effective approach for test preparation.",
+        concept: "Problem-solving strategy",
+        difficulty: "medium"
+      });
+    }
+
+    return fallbackQuestions;
+  }
+
+  // Prefetch next batch of questions in background
+  async prefetchNextBatch(moduleId, userLevel, nextStartIndex, batchSize = 5) {
+    try {
+      const nextBatch = await this.generateQuestionBatch(moduleId, userLevel, batchSize, nextStartIndex);
+
+      // Store in a simple cache
+      const cacheKey = `${moduleId}-${userLevel}-${nextStartIndex}`;
+      this.questionCache = this.questionCache || new Map();
+      this.questionCache.set(cacheKey, nextBatch);
+
+      console.log(`Prefetched batch starting at question ${nextStartIndex + 1}`);
+      return nextBatch;
+    } catch (error) {
+      console.error("Failed to prefetch next batch:", error);
+      return null;
+    }
+  }
+
+  // Get questions with lazy loading
+  async getQuestionsLazy(moduleId, userLevel, totalQuestions = 25) {
+    const batchSize = 5;
+    const firstBatch = await this.generateQuestionBatch(moduleId, userLevel, batchSize, 0);
+
+    // Start prefetching the next batch immediately
+    if (totalQuestions > batchSize) {
+      this.prefetchNextBatch(moduleId, userLevel, batchSize, batchSize);
+    }
+
+    return {
+      questions: firstBatch,
+      hasMore: totalQuestions > batchSize,
+      nextBatchIndex: batchSize,
+      totalQuestions,
+      batchSize
+    };
+  }
+
+  // Get next batch of questions
+  async getNextQuestionBatch(moduleId, userLevel, startIndex, batchSize = 5) {
+    const cacheKey = `${moduleId}-${userLevel}-${startIndex}`;
+
+    // Check cache first
+    if (this.questionCache && this.questionCache.has(cacheKey)) {
+      const cachedBatch = this.questionCache.get(cacheKey);
+      this.questionCache.delete(cacheKey); // Remove from cache after use
+
+      // Start prefetching the next batch
+      const nextStartIndex = startIndex + batchSize;
+      this.prefetchNextBatch(moduleId, userLevel, nextStartIndex, batchSize);
+
+      return cachedBatch;
+    }
+
+    // Generate batch if not in cache
+    const batch = await this.generateQuestionBatch(moduleId, userLevel, batchSize, startIndex);
+
+    // Start prefetching the next batch
+    const nextStartIndex = startIndex + batchSize;
+    this.prefetchNextBatch(moduleId, userLevel, nextStartIndex, batchSize);
+
+    return batch;
   }
 
   // Generate interactive lesson content
@@ -988,22 +1196,38 @@ Keep recommendations specific to ${testType} format and these exact weak areas. 
         "Include a well-written passage here for reading comprehension";
     }
 
-    const prompt = `${
-      lessonPrompts[moduleId] || lessonPrompts["vocabulary-basics"]
+    const prompt = `You are an expert test preparation instructor creating an engaging lesson for ${moduleId} at level ${userLevel}.
+
+${lessonPrompts[moduleId] || lessonPrompts["vocabulary-basics"]}
+
+CRITICAL: Return ONLY a valid JSON object. No markdown, no explanation, no extra text.
+
+Required JSON structure:
+{
+  "id": "${moduleId}-lesson-${Date.now()}",
+  "title": "Engaging lesson title",
+  "description": "Brief description of what students will learn",
+  "practiceQuestions": [
+    {
+      "id": 1,
+      "question": "Clear question text",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswer": 0,
+      "explanation": "Detailed explanation with learning strategies",
+      "concept": "Key concept being tested",
+      "difficulty": "easy|medium|hard"
     }
-
-IMPORTANT: Return ONLY a valid JSON object with this exact structure:
-${JSON.stringify(baseStructure, null, 2)}
-
-${requiresPassage
-        ? "This module requires a reading passage. Include a substantive, well-written passage of 200-300 words."
-        : "This module does NOT require a reading passage. Focus on individual questions with context."
+  ],
+  "tips": ["Practical study tip", "Strategy advice"],
+  "nextSteps": "What to practice next for improvement"
 }
 
-Make it engaging, educational, and fun like Duolingo!`;
+${requiresPassage ? 'Include a "passage" field with a well-written 200-300 word passage for reading comprehension.' : ''}
+
+Make the lesson engaging and educational. Generate ONLY the JSON object:`;
 
     const data = {
-      model: "google/gemma-3-4b-it",
+      model: retryCount === 0 ? "anthropic/claude-3.5-sonnet-20241022" : "google/gemini-2.5-flash-lite",
       messages: [
         {
           role: "user",
@@ -1011,29 +1235,24 @@ Make it engaging, educational, and fun like Duolingo!`;
         },
       ],
       temperature: 0.7,
-      max_tokens: 2000,
+      max_tokens: 2500,
     };
 
     try {
       const response = await this.makeRequest("/chat/completions", data);
       const content = response.choices[0].message.content;
 
-      // Parse lesson content
-      let lesson = null;
-      try {
-        lesson = JSON.parse(content.trim());
-      } catch {
-        // Try regex extraction
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          lesson = JSON.parse(jsonMatch[0]);
-        }
-      }
+      // Use robust JSON parsing
+      const lesson = this.cleanAndParseJSON(content);
 
-      if (lesson && this.validateLesson(lesson)) {
+      if (this.validateLesson(lesson)) {
+        // Transform to expected format if needed
+        if (lesson.questions && !lesson.practiceQuestions) {
+          lesson.practiceQuestions = lesson.questions;
+        }
         return lesson;
       } else {
-        throw new Error("Invalid lesson structure");
+        throw new Error("Generated lesson failed validation");
       }
     } catch (error) {
       console.error(
@@ -1046,84 +1265,138 @@ Make it engaging, educational, and fun like Duolingo!`;
         return this.generateLesson(moduleId, userLevel, retryCount + 1);
       }
 
-      // Return fallback lesson
-      return this.getFallbackLesson(moduleId);
+      // Use dynamic AI fallback instead of hardcoded lessons
+      console.warn("All AI generation attempts failed, trying dynamic fallback");
+      return await this.generateFallbackLesson(moduleId);
     }
   }
 
   // Validate lesson structure
   validateLesson(lesson) {
-    return (
-      lesson &&
-      typeof lesson.title === "string" &&
-      Array.isArray(lesson.questions) &&
-      lesson.questions.length > 0 &&
-      lesson.questions.every(
-        (q) =>
-          typeof q.question === "string" &&
-          Array.isArray(q.options) &&
-          q.options.length >= 4 &&
-          typeof q.correctAnswer === "number" &&
-          typeof q.explanation === "string"
-      )
-    );
+    if (!lesson || typeof lesson !== 'object') {
+      console.log('Validation failed: Not an object');
+      return false;
+    }
+
+    // Check title
+    if (!lesson.title || typeof lesson.title !== "string") {
+      console.log('Validation failed: Invalid title');
+      return false;
+    }
+
+    // Check for questions (either 'questions' or 'practiceQuestions')
+    const questions = lesson.questions || lesson.practiceQuestions;
+    if (!Array.isArray(questions)) {
+      console.log('Validation failed: No questions array found');
+      return false;
+    }
+
+    if (questions.length === 0) {
+      console.log('Validation failed: Empty questions array');
+      return false;
+    }
+
+    // Validate each question
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      if (!q || typeof q !== 'object') {
+        console.log(`Validation failed: Question ${i} is not an object`);
+        return false;
+      }
+
+      if (typeof q.question !== "string" || q.question.trim().length < 3) {
+        console.log(`Validation failed: Question ${i} has invalid question text`);
+        return false;
+      }
+
+      if (!Array.isArray(q.options) || q.options.length < 4) {
+        console.log(`Validation failed: Question ${i} has invalid options`);
+        return false;
+      }
+
+      if (typeof q.correctAnswer !== "number" || q.correctAnswer < 0 || q.correctAnswer >= q.options.length) {
+        console.log(`Validation failed: Question ${i} has invalid correctAnswer`);
+        return false;
+      }
+
+      if (typeof q.explanation !== "string" || q.explanation.trim().length < 3) {
+        console.log(`Validation failed: Question ${i} has invalid explanation`);
+        return false;
+      }
+    }
+
+    console.log('Lesson validation passed');
+    return true;
   }
 
-  // Fallback lesson generator
-  getFallbackLesson(moduleId) {
-    const fallbackLessons = {
-      "vocabulary-basics": {
-        id: `${moduleId}-fallback`,
-        title: "Essential Vocabulary Builder",
-        description: "Master key vocabulary words for test success",
-        questions: [
-          {
-            question:
-              "The professor's lecture was so _____ that many students fell asleep.",
-            options: ["engaging", "tedious", "fascinating", "brief"],
-            correctAnswer: 1,
-            explanation:
-              "Tedious means boring or monotonous, which would cause students to fall asleep.",
-          },
-          {
-            question: "Her _____ nature made her an excellent diplomat.",
-            options: ["hostile", "aggressive", "tactful", "reckless"],
-            correctAnswer: 2,
-            explanation:
-              "Tactful means having diplomacy and sensitivity in dealing with others.",
-          },
-        ],
-        tips: [
-          "Use context clues to determine word meaning",
-          "Look for positive or negative connotations",
-        ],
-        nextSteps: "Practice with more advanced vocabulary in context",
-      },
-      "math-foundations": {
-        id: `${moduleId}-fallback`,
-        title: "Algebraic Problem Solving",
-        description: "Build strong foundation in algebraic thinking",
-        questions: [
-          {
-            question: "If 3x + 7 = 22, what is the value of x?",
-            options: ["3", "5", "7", "15"],
-            correctAnswer: 1,
-            explanation:
-              "Subtract 7 from both sides: 3x = 15. Then divide by 3: x = 5.",
-          },
-          {
-            question: "What is 25% of 80?",
-            options: ["15", "20", "25", "30"],
-            correctAnswer: 1,
-            explanation: "25% = 0.25. So 0.25 × 80 = 20.",
-          },
-        ],
-        tips: ["Work step by step", "Check your answer by substitution"],
-        nextSteps: "Practice more complex algebraic equations",
-      },
-    };
+  // Dynamic fallback lesson generator using simpler prompts
+  async generateFallbackLesson(moduleId) {
+    const simplePrompt = `Create a simple educational lesson for ${moduleId}. Return only this JSON:
+{
+  "title": "Lesson Title",
+  "practiceQuestions": [
+    {
+      "id": 1,
+      "question": "Question text?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswer": 0,
+      "explanation": "Simple explanation"
+    },
+    {
+      "id": 2,
+      "question": "Another question?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswer": 1,
+      "explanation": "Another explanation"
+    }
+  ]
+}`;
 
-    return fallbackLessons[moduleId] || fallbackLessons["vocabulary-basics"];
+    try {
+      const response = await this.makeRequest("/chat/completions", {
+        model: "meta-llama/llama-3.1-8b-instruct:free",
+        messages: [{ role: "user", content: simplePrompt }],
+        temperature: 0.3,
+        max_tokens: 1000,
+      });
+
+      const lesson = this.cleanAndParseJSON(response.choices[0].message.content);
+
+      if (this.validateLesson(lesson)) {
+        return lesson;
+      }
+    } catch (error) {
+      console.error("Dynamic fallback failed:", error);
+    }
+
+    // Ultimate fallback - create a minimal lesson programmatically
+    return {
+      id: `${moduleId}-minimal-fallback`,
+      title: `${moduleId.replace(/-/g, ' ')} Practice`,
+      description: "Basic practice questions to get you started",
+      practiceQuestions: [
+        {
+          id: 1,
+          question: "This is a sample question to demonstrate the format. What is the best approach to learning?",
+          options: ["Practice regularly", "Study once", "Skip difficult topics", "Memorize answers"],
+          correctAnswer: 0,
+          explanation: "Regular practice is the most effective way to improve your skills and build confidence.",
+          concept: "Learning strategies",
+          difficulty: "easy"
+        },
+        {
+          id: 2,
+          question: "When preparing for tests, which strategy is most effective?",
+          options: ["Cramming the night before", "Consistent daily practice", "Reading only", "Guessing strategies"],
+          correctAnswer: 1,
+          explanation: "Consistent daily practice helps build lasting knowledge and reduces test anxiety.",
+          concept: "Test preparation",
+          difficulty: "easy"
+        }
+      ],
+      tips: ["Practice regularly", "Focus on understanding concepts", "Review your mistakes"],
+      nextSteps: "Continue practicing with more advanced questions"
+    };
   }
 }
 

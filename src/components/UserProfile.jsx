@@ -131,11 +131,28 @@ const UserProfile = ({ open, onClose }) => {
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth="sm"
+      fullWidth
+      disableEnforceFocus={false}
+      disableAutoFocus={false}
+      disableRestoreFocus={false}
+      keepMounted={false}
+      aria-labelledby="user-profile-title"
+      aria-describedby="user-profile-content"
+    >
+      <DialogTitle id="user-profile-title">
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <Typography variant="h6">
-            {isAnonymous ? 'Guest Profile' : 'User Profile'}
+            {isAnonymous ? "Guest Profile" : "User Profile"}
           </Typography>
           <IconButton onClick={handleClose}>
             <Close />
@@ -143,7 +160,7 @@ const UserProfile = ({ open, onClose }) => {
         </Box>
       </DialogTitle>
 
-      <DialogContent dividers>
+      <DialogContent dividers id="user-profile-content">
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
@@ -158,14 +175,15 @@ const UserProfile = ({ open, onClose }) => {
 
         {isAnonymous ? (
           // Anonymous user view
-          <Box sx={{ textAlign: 'center', py: 3 }}>
-            <Person sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+          <Box sx={{ textAlign: "center", py: 3 }}>
+            <Person sx={{ fontSize: 64, color: "text.secondary", mb: 2 }} />
             <Typography variant="h6" gutterBottom>
               Guest User
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              You are currently using the app as a guest. Your progress will not be saved.
-              Create an account to save your test results and track your improvement.
+              You are currently using the app as a guest. Your progress will not
+              be saved. Create an account to save your test results and track
+              your improvement.
             </Typography>
             <Button variant="contained" onClick={handleLogout}>
               Sign Up for an Account
@@ -179,16 +197,13 @@ const UserProfile = ({ open, onClose }) => {
               <Typography variant="h6" gutterBottom>
                 Account Information
               </Typography>
-              
+
               <List dense>
                 <ListItem>
                   <ListItemIcon>
                     <Email />
                   </ListItemIcon>
-                  <ListItemText
-                    primary="Email"
-                    secondary={user?.email}
-                  />
+                  <ListItemText primary="Email" secondary={user?.email} />
                 </ListItem>
                 <ListItem>
                   <ListItemIcon>
@@ -196,7 +211,7 @@ const UserProfile = ({ open, onClose }) => {
                   </ListItemIcon>
                   <ListItemText
                     primary="Display Name"
-                    secondary={user?.displayName || 'Not set'}
+                    secondary={user?.displayName || "Not set"}
                   />
                 </ListItem>
               </List>
@@ -209,7 +224,7 @@ const UserProfile = ({ open, onClose }) => {
               <Typography variant="h6" gutterBottom>
                 Update Profile
               </Typography>
-              
+
               <TextField
                 fullWidth
                 label="Display Name"
@@ -241,7 +256,7 @@ const UserProfile = ({ open, onClose }) => {
               <TextField
                 fullWidth
                 label="Current Password"
-                type={showCurrentPassword ? 'text' : 'password'}
+                type={showCurrentPassword ? "text" : "password"}
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 margin="normal"
@@ -250,10 +265,16 @@ const UserProfile = ({ open, onClose }) => {
                   endAdornment: (
                     <InputAdornment position="end">
                       <IconButton
-                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                        onClick={() =>
+                          setShowCurrentPassword(!showCurrentPassword)
+                        }
                         edge="end"
                       >
-                        {showCurrentPassword ? <VisibilityOff /> : <Visibility />}
+                        {showCurrentPassword ? (
+                          <VisibilityOff />
+                        ) : (
+                          <Visibility />
+                        )}
                       </IconButton>
                     </InputAdornment>
                   ),
@@ -263,7 +284,7 @@ const UserProfile = ({ open, onClose }) => {
               <TextField
                 fullWidth
                 label="New Password"
-                type={showNewPassword ? 'text' : 'password'}
+                type={showNewPassword ? "text" : "password"}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 margin="normal"
@@ -285,7 +306,7 @@ const UserProfile = ({ open, onClose }) => {
               <TextField
                 fullWidth
                 label="Confirm New Password"
-                type={showConfirmPassword ? 'text' : 'password'}
+                type={showConfirmPassword ? "text" : "password"}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 margin="normal"
@@ -294,10 +315,16 @@ const UserProfile = ({ open, onClose }) => {
                   endAdornment: (
                     <InputAdornment position="end">
                       <IconButton
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        onClick={() =>
+                          setShowConfirmPassword(!showConfirmPassword)
+                        }
                         edge="end"
                       >
-                        {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                        {showConfirmPassword ? (
+                          <VisibilityOff />
+                        ) : (
+                          <Visibility />
+                        )}
                       </IconButton>
                     </InputAdornment>
                   ),
@@ -319,15 +346,9 @@ const UserProfile = ({ open, onClose }) => {
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={handleClose}>
-          Close
-        </Button>
-        <Button
-          color="error"
-          onClick={handleLogout}
-          startIcon={<ExitToApp />}
-        >
-          {isAnonymous ? 'Sign In' : 'Sign Out'}
+        <Button onClick={handleClose}>Close</Button>
+        <Button color="error" onClick={handleLogout} startIcon={<ExitToApp />}>
+          {isAnonymous ? "Sign In" : "Sign Out"}
         </Button>
       </DialogActions>
     </Dialog>
