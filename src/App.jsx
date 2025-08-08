@@ -81,7 +81,8 @@ function AppContent() {
   const [answers, setAnswers] = useState([]);
   const [testResult, setTestResult] = useState(null);
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
-  const [error, setError] = useState('');
+  const [preloadingQuestions, setPreloadingQuestions] = useState(new Set()); // Track which questions are being preloaded
+  const [error, setError] = useState("");
   const [showProfile, setShowProfile] = useState(false);
 
   // Don't auto sign in as guest anymore - let user choose
@@ -91,7 +92,7 @@ function AppContent() {
   };
 
   const clearError = () => {
-    setError('');
+    setError("");
   };
 
   const startTestSelection = () => {
@@ -107,87 +108,191 @@ function AppContent() {
     setQuestions([]);
     setAnswers(new Array(config.questionCount).fill(null));
     setCurrentQuestionIndex(0);
+    setPreloadingQuestions(new Set()); // Clear preloading state
     setAppState(APP_STATES.TEST_IN_PROGRESS);
-    
+
     // Start generating the first question
     await generateQuestion(0, false, config);
   };
 
-    const generateQuestion = async (questionIndex, isPreload = false, config = null) => {
+  const generateQuestion = async (
+    questionIndex,
+    isPreload = false,
+    config = null
+  ) => {
+    // For preloading, check if already being preloaded
+    if (isPreload && preloadingQuestions.has(questionIndex)) {
+      console.log(
+        `Question ${questionIndex + 1} is already being preloaded, skipping`
+      );
+      return;
+    }
+
+    // Mark as being preloaded if it's a preload operation
+    if (isPreload) {
+      setPreloadingQuestions((prev) => new Set([...prev, questionIndex]));
+    }
+
     if (!isPreload) {
       setIsLoadingQuestion(true);
     }
     try {
       const currentConfig = config || testConfig;
+
+      // Guard against null testConfig
+      if (!currentConfig || !currentConfig.testType || !currentConfig.section) {
+        console.error("Invalid test configuration:", currentConfig);
+        throw new Error("Test configuration is not available");
+      }
+
+      console.log(
+        `${isPreload ? "Preloading" : "Generating"} question ${
+          questionIndex + 1
+        } for ${currentConfig.testType} ${currentConfig.section} ${
+          currentConfig.difficulty
+        }`
+      );
+
       const question = await openRouterService.generateQuestion(
         currentConfig.testType,
         currentConfig.section,
         currentConfig.difficulty
       );
-      
+
+      console.log(
+        `Successfully ${isPreload ? "preloaded" : "generated"} question ${
+          questionIndex + 1
+        }:`,
+        question
+      );
+
       // Update questions array at specific index
-      const newQuestions = [...questions];
-      newQuestions[questionIndex] = question;
-      setQuestions(newQuestions);
+      setQuestions((prevQuestions) => {
+        const newQuestions = [...prevQuestions];
+        newQuestions[questionIndex] = question;
+        return newQuestions;
+      });
 
       // Preload the next 2 questions in the background if this is not already a preload
       if (!isPreload && questionIndex < currentConfig.questionCount - 1) {
-        // Preload next question
-        const nextIndex = questionIndex + 1;
-        if (!questions[nextIndex]) {
-          setTimeout(() => generateQuestion(nextIndex, true), 500);
-        }
-        
-        // Preload the question after next if it exists
-        const nextNextIndex = questionIndex + 2;
-        if (nextNextIndex < currentConfig.questionCount && !questions[nextNextIndex]) {
-          setTimeout(() => generateQuestion(nextNextIndex, true), 1000);
-        }
+        // Simple preloading - no complex state checks that might interfere
+        setTimeout(() => {
+          const nextIndex = questionIndex + 1;
+          if (!preloadingQuestions.has(nextIndex)) {
+            generateQuestion(nextIndex, true, currentConfig);
+          }
+        }, 500);
+
+        setTimeout(() => {
+          const nextNextIndex = questionIndex + 2;
+          if (
+            nextNextIndex < currentConfig.questionCount &&
+            !preloadingQuestions.has(nextNextIndex)
+          ) {
+            generateQuestion(nextNextIndex, true, currentConfig);
+          }
+        }, 1000);
       }
+
+      // Return the generated question so nextQuestion can use it immediately
+      return question;
     } catch (error) {
-      console.error('Failed to generate question:', error);
+      console.error(`Failed to generate question ${questionIndex + 1}:`, error);
       if (!isPreload) {
-        showError('Failed to generate question. Please try again.');
+        // For main question generation failures, show error to user
+        showError(
+          `Failed to generate question ${questionIndex + 1}. ${
+            error.message || "Please try again."
+          }`
+        );
+        // Re-throw error so nextQuestion can handle it
+        throw error;
+      } else {
+        // For preload failures, just log and continue silently
+        console.warn(
+          `Preload failed for question ${
+            questionIndex + 1
+          }, will generate when needed`
+        );
+        // Don't re-throw for preload failures to avoid breaking user experience
+        return null;
       }
     } finally {
+      // Clean up preloading state
+      if (isPreload) {
+        setPreloadingQuestions((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(questionIndex);
+          return newSet;
+        });
+      }
+
       if (!isPreload) {
         setIsLoadingQuestion(false);
       }
     }
   };
-
   const handleAnswer = (answerIndex, timeSpent) => {
     const newAnswers = [...answers];
     newAnswers[currentQuestionIndex] = {
       answerIndex,
-      timeSpent
+      timeSpent,
     };
     setAnswers(newAnswers);
   };
 
   const nextQuestion = async () => {
-    const nextIndex = currentQuestionIndex + 1;
-    if (nextIndex < testConfig.questionCount) {
-      setCurrentQuestionIndex(nextIndex);
-      
-      // If the next question doesn't exist, generate it
-      if (!questions[nextIndex]) {
-        await generateQuestion(nextIndex);
-      } else {
-        // If the question already exists, still trigger preloading of upcoming questions
-        const nextNextIndex = nextIndex + 1;
-        if (nextNextIndex < testConfig.questionCount && !questions[nextNextIndex]) {
-          setTimeout(() => generateQuestion(nextNextIndex, true), 100);
+    try {
+      const nextIndex = currentQuestionIndex + 1;
+      if (nextIndex < testConfig.questionCount) {
+        // If the next question doesn't exist, generate it first
+        if (!questions[nextIndex]) {
+          console.log(
+            `Question ${nextIndex + 1} not preloaded, generating now...`
+          );
+          const generatedQuestion = await generateQuestion(nextIndex, false); // false = not preload, will show loading state
+
+          // Ensure we have the question before proceeding
+          if (!generatedQuestion) {
+            throw new Error("Failed to generate question");
+          }
+        } else {
+          console.log(
+            `Question ${nextIndex + 1} already available, proceeding...`
+          );
         }
-        
-        const nextNextNextIndex = nextIndex + 2;
-        if (nextNextNextIndex < testConfig.questionCount && !questions[nextNextNextIndex]) {
-          setTimeout(() => generateQuestion(nextNextNextIndex, true), 300);
-        }
+
+        // Only update the index after we're sure the question exists
+        setCurrentQuestionIndex(nextIndex);
+
+        // Trigger preloading of upcoming questions (in background)
+        setTimeout(() => {
+          const nextNextIndex = nextIndex + 1;
+          if (
+            nextNextIndex < testConfig.questionCount &&
+            !preloadingQuestions.has(nextNextIndex)
+          ) {
+            generateQuestion(nextNextIndex, true, testConfig);
+          }
+        }, 100);
+
+        setTimeout(() => {
+          const nextNextNextIndex = nextIndex + 2;
+          if (
+            nextNextNextIndex < testConfig.questionCount &&
+            !preloadingQuestions.has(nextNextNextIndex)
+          ) {
+            generateQuestion(nextNextNextIndex, true, testConfig);
+          }
+        }, 300);
       }
+    } catch (error) {
+      console.error("Error in nextQuestion:", error);
+      showError(
+        `Failed to load next question. ${error.message || "Please try again."}`
+      );
     }
   };
-
   const previousQuestion = () => {
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex(currentQuestionIndex - 1);

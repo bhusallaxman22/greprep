@@ -200,25 +200,28 @@ class OpenRouterService {
     const currentModel = models[Math.min(retryCount, models.length - 1)];
 
     const prompt = `Generate a ${testType} ${section} question with ${difficulty} difficulty. 
+
+    CRITICAL: Return ONLY valid JSON. No extra text, no markdown, no explanations. Just the JSON object.
     
-    IMPORTANT: Return ONLY a valid JSON object with this exact structure (no additional text or formatting):
+    Required JSON format:
     {
-      "question": "The question text",
+      "question": "Question text here",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correctAnswer": 0,
-      "explanation": "Detailed explanation of the correct answer with step-by-step reasoning"
+      "explanation": "Explanation text here"
     }
 
-    Additional guidelines:
-    - For Reading Comprehension: Include a "passage" field with substantial text (200-300 words)
-    - For Math/Data questions: You may include an "image" field describing helpful visual aids
-    - For Vocabulary: Use challenging but appropriate words
-    - Make sure the question is realistic and follows official ${testType} format guidelines
-    - All options should be plausible
-    - The correct answer index must be accurate (0-3)
-    - Provide detailed explanations with learning strategies
-    - Only include "passage" or "image" fields if truly needed for the question type
-    - Return ONLY the JSON object, no other text`;
+    Guidelines:
+    - For Reading Comprehension: Include a "passage" field with 200-300 words
+    - For Math/Visual questions: You may include an "imageDescription" field
+    - Question must be realistic and follow official ${testType} format
+    - All 4 options must be plausible
+    - correctAnswer must be 0, 1, 2, or 3 (array index)
+    - Explanation must be detailed and educational
+    - Do NOT use escape characters unless absolutely necessary
+    - Keep text simple and avoid complex formatting
+
+    Return ONLY the JSON object:`;
 
     const data = {
       model: currentModel,
@@ -236,62 +239,71 @@ class OpenRouterService {
       const response = await this.makeRequest("/chat/completions", data);
       const content = response.choices[0].message.content;
 
-      console.log('AI Response Content:', content);
-
       // Try multiple JSON extraction methods
       let parsedQuestion = null;
 
       // Method 1: Direct JSON parse
       try {
         parsedQuestion = JSON.parse(content.trim());
-        console.log('Method 1 (direct parse) succeeded:', parsedQuestion);
       } catch {
         // Method 2: Extract JSON with regex
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           try {
             parsedQuestion = JSON.parse(jsonMatch[0]);
-            console.log('Method 2 (regex extraction) succeeded:', parsedQuestion);
           } catch {
-            // Method 3: Clean and extract JSON
-            const cleanedContent = content
+            // Method 3: Clean and extract JSON with better escape handling
+            let cleanedContent = content
               .replace(/```json\s*/, "")
               .replace(/```\s*$/, "")
               .replace(/^[^{]*/, "")
               .replace(/[^}]*$/, "");
-            parsedQuestion = JSON.parse(cleanedContent);
-            console.log('Method 3 (cleaned extraction) succeeded:', parsedQuestion);
+
+            // Fix common escape character issues
+            cleanedContent = cleanedContent
+              .replace(/\\'/g, "'")  // Fix escaped single quotes
+              .replace(/\\"/g, '"')  // Fix escaped double quotes that shouldn't be escaped
+              .replace(/\\\\/g, "\\") // Fix double backslashes
+              .replace(/\\n/g, "\\n") // Ensure newlines are properly escaped
+              .replace(/\\t/g, "\\t"); // Ensure tabs are properly escaped
+
+            try {
+              parsedQuestion = JSON.parse(cleanedContent);
+            } catch {
+              // Method 4: Try to fix specific JSON issues
+              const fixedContent = cleanedContent
+                .replace(/([{,]\s*)"([^"]*)"(\s*:\s*)"([^"]*(?:\\.[^"]*)*)"/g, '$1"$2"$3"$4"') // Fix quotes in values
+                .replace(/\n/g, '\\n')  // Escape actual newlines
+                .replace(/\r/g, '\\r')  // Escape carriage returns
+                .replace(/\t/g, '\\t'); // Escape tabs
+
+              parsedQuestion = JSON.parse(fixedContent);
+            }
           }
         }
       }
 
       // Validate the parsed question
-      console.log('About to validate question:', parsedQuestion);
-      console.log('parsedQuestion exists:', !!parsedQuestion);
-
-      const isValid = this.validateQuestion(parsedQuestion);
-      console.log('Validation result:', isValid);
-
-      if (parsedQuestion && isValid) {
-        console.log('Validation passed, adding required fields...');
+      if (parsedQuestion && this.validateQuestion(parsedQuestion)) {
       // Ensure required fields are present and clean up any empty fields
         parsedQuestion.testType = testType;
         parsedQuestion.section = section;
         parsedQuestion.difficulty = difficulty;
 
         // Remove empty passage or image fields if they exist
-        if (parsedQuestion.passage === "" || parsedQuestion.passage === null) {
+        if (parsedQuestion.passage === "" || parsedQuestion.passage === null || parsedQuestion.passage === undefined) {
           delete parsedQuestion.passage;
         }
-        if (parsedQuestion.image === "" || parsedQuestion.image === null) {
+        if (parsedQuestion.image === "" || parsedQuestion.image === null || parsedQuestion.image === undefined) {
           delete parsedQuestion.image;
         }
+        if (parsedQuestion.imageDescription === "" || parsedQuestion.imageDescription === null || parsedQuestion.imageDescription === undefined) {
+          delete parsedQuestion.imageDescription;
+        }
 
-        console.log('Final question object:', parsedQuestion);
         return parsedQuestion;
       } else {
-        console.error('Validation failed - parsedQuestion:', !!parsedQuestion, 'isValid:', isValid);
-        throw new Error("Invalid question structure");
+        throw new Error("Generated question failed validation");
       }
     } catch (error) {
       console.error(
@@ -321,50 +333,43 @@ class OpenRouterService {
 
   // Validate question structure
   validateQuestion(question) {
-    // Add debugging to understand what's failing
-    if (!question) {
-      console.error('Validation failed: question is null/undefined');
+    if (!question || typeof question !== 'object') {
       return false;
     }
 
-    if (typeof question.question !== "string") {
-      console.error('Validation failed: question.question is not a string', typeof question.question);
+    // Check question text
+    if (typeof question.question !== "string" || question.question.trim().length < 3) {
       return false;
     }
 
+    // Check options array
     if (!Array.isArray(question.options)) {
-      console.error('Validation failed: question.options is not an array', question.options);
       return false;
     }
 
-    if (question.options.length < 4) {
-      console.error('Validation failed: question.options has less than 4 items', question.options.length);
+    // Accept both 4 and 5 options (some fallback questions have 5)
+    if (question.options.length < 4 || question.options.length > 5) {
       return false;
     }
 
-    if (typeof question.correctAnswer !== "number") {
-      console.error('Validation failed: question.correctAnswer is not a number', typeof question.correctAnswer, question.correctAnswer);
+    // Check correct answer
+    if (typeof question.correctAnswer !== "number" ||
+      question.correctAnswer < 0 ||
+      question.correctAnswer >= question.options.length) {
       return false;
     }
 
-    if (question.correctAnswer < 0 || question.correctAnswer >= question.options.length) {
-      console.error('Validation failed: question.correctAnswer is out of range', question.correctAnswer, question.options.length);
+    // Check explanation
+    if (typeof question.explanation !== "string" || question.explanation.trim().length < 3) {
       return false;
     }
 
-    if (typeof question.explanation !== "string") {
-      console.error('Validation failed: question.explanation is not a string', typeof question.explanation);
-      return false;
-    }
-
-    if (question.question.length <= 10) {
-      console.error('Validation failed: question.question is too short', question.question.length);
-      return false;
-    }
-
-    if (question.explanation.length <= 10) {
-      console.error('Validation failed: question.explanation is too short', question.explanation.length);
-      return false;
+    // Check that all options are valid strings
+    for (let i = 0; i < question.options.length; i++) {
+      const option = question.options[i];
+      if (typeof option !== "string" || option.trim().length < 1) {
+        return false;
+      }
     }
 
     return true;

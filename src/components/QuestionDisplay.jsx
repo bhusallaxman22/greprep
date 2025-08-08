@@ -72,7 +72,7 @@ const QuestionDisplay = ({
 
   if (isLoading) {
     return (
-      <Container maxWidth="md" sx={{ mt: 4, textAlign: 'center' }}>
+      <Container maxWidth="md" sx={{ mt: 4, textAlign: "center" }}>
         <CircularProgress size={60} sx={{ mb: 2 }} />
         <Typography variant="h6">Generating question...</Typography>
       </Container>
@@ -81,9 +81,27 @@ const QuestionDisplay = ({
 
   if (!question) {
     return (
+      <Container maxWidth="md" sx={{ mt: 4, textAlign: "center" }}>
+        <Typography variant="h6" color="text.secondary">
+          Question not available
+        </Typography>
+      </Container>
+    );
+  }
+
+  // Validate question structure
+  if (
+    !question.question ||
+    !Array.isArray(question.options) ||
+    question.options.length < 4 ||
+    typeof question.correctAnswer !== "number" ||
+    !question.explanation
+  ) {
+    return (
       <Container maxWidth="md" sx={{ mt: 4 }}>
         <Alert severity="error">
-          Failed to load question. Please try again.
+          Invalid question format detected. Please try generating a new
+          question.
         </Alert>
       </Container>
     );
