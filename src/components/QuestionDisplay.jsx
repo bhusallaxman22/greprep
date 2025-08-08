@@ -27,7 +27,8 @@ const QuestionDisplay = ({
   onPrevious, 
   onFinish,
   selectedAnswer,
-  isLoading 
+  isLoading,
+  questionsArray = [] // Add to show preloading status
 }) => {
   const [currentAnswer, setCurrentAnswer] = useState(selectedAnswer || '');
   const [timeSpent, setTimeSpent] = useState(0);
@@ -119,9 +120,17 @@ const QuestionDisplay = ({
           value={progress} 
           sx={{ height: 8, borderRadius: 1 }}
         />
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-          {Math.round(progress)}% Complete
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            {Math.round(progress)}% Complete
+          </Typography>
+          {/* Show preloading status */}
+          {questionsArray.length > 0 && (
+            <Typography variant="caption" color="text.secondary">
+              Questions loaded: {questionsArray.filter(q => q !== undefined).length}/{totalQuestions}
+            </Typography>
+          )}
+        </Box>
       </Paper>
 
       {/* Question Section */}
@@ -132,6 +141,67 @@ const QuestionDisplay = ({
             color="primary" 
             sx={{ mb: 2 }}
           />
+          
+          {/* Passage Display */}
+          {question.passage && (
+            <Paper 
+              elevation={1} 
+              sx={{ 
+                p: 3, 
+                mb: 3, 
+                backgroundColor: 'grey.50',
+                border: '1px solid',
+                borderColor: 'grey.200'
+              }}
+            >
+              <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                Reading Passage
+              </Typography>
+              <Typography 
+                variant="body1" 
+                sx={{ 
+                  lineHeight: 1.8,
+                  fontFamily: 'Georgia, serif',
+                  textAlign: 'justify'
+                }}
+              >
+                {question.passage}
+              </Typography>
+            </Paper>
+          )}
+          
+          {/* Image Display */}
+          {question.imageDescription && (
+            <Paper 
+              elevation={1} 
+              sx={{ 
+                p: 3, 
+                mb: 3, 
+                backgroundColor: 'blue.50',
+                border: '1px solid',
+                borderColor: 'blue.200',
+                textAlign: 'center'
+              }}
+            >
+              <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                Visual Reference
+              </Typography>
+              <Box 
+                sx={{ 
+                  p: 2, 
+                  backgroundColor: 'white',
+                  borderRadius: 1,
+                  border: '2px dashed',
+                  borderColor: 'grey.300'
+                }}
+              >
+                <Typography variant="body1" sx={{ fontStyle: 'italic', color: 'text.secondary' }}>
+                  📊 {question.imageDescription}
+                </Typography>
+              </Box>
+            </Paper>
+          )}
+          
           <Typography variant="h5" component="h2" sx={{ lineHeight: 1.6, mb: 3 }}>
             {question.question}
           </Typography>
@@ -211,8 +281,14 @@ const QuestionDisplay = ({
             endIcon={<NavigateNext />}
             onClick={handleNext}
             disabled={currentAnswer === ''}
+            sx={{
+              backgroundColor: questionsArray[questionNumber] ? 'success.main' : 'primary.main',
+              '&:hover': {
+                backgroundColor: questionsArray[questionNumber] ? 'success.dark' : 'primary.dark',
+              }
+            }}
           >
-            Next
+            {questionsArray[questionNumber] ? 'Next (Ready)' : 'Next'}
           </Button>
         )}
       </Box>

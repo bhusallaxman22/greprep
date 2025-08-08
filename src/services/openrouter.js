@@ -204,18 +204,20 @@ class OpenRouterService {
     IMPORTANT: Return ONLY a valid JSON object with this exact structure (no additional text or formatting):
     {
       "question": "The question text",
-      "options": ["Option A", "Option B", "Option C", "Option D", "Option E"],
+      "options": ["Option A", "Option B", "Option C", "Option D"],
       "correctAnswer": 0,
-      "explanation": "Detailed explanation of the correct answer",
-      "difficulty": "${difficulty}",
-      "section": "${section}",
-      "testType": "${testType}"
+      "explanation": "Detailed explanation of the correct answer with step-by-step reasoning"
     }
 
-    Make sure:
-    - The question is realistic and follows official ${testType} format guidelines
-    - All options are plausible
-    - The correct answer index is accurate (0-4)
+    Additional guidelines:
+    - For Reading Comprehension: Include a "passage" field with substantial text (200-300 words)
+    - For Math/Data questions: You may include an "image" field describing helpful visual aids
+    - For Vocabulary: Use challenging but appropriate words
+    - Make sure the question is realistic and follows official ${testType} format guidelines
+    - All options should be plausible
+    - The correct answer index must be accurate (0-3)
+    - Provide detailed explanations with learning strategies
+    - Only include "passage" or "image" fields if truly needed for the question type
     - Return ONLY the JSON object, no other text`;
 
     const data = {
@@ -234,18 +236,22 @@ class OpenRouterService {
       const response = await this.makeRequest("/chat/completions", data);
       const content = response.choices[0].message.content;
 
+      console.log('AI Response Content:', content);
+
       // Try multiple JSON extraction methods
       let parsedQuestion = null;
 
       // Method 1: Direct JSON parse
       try {
         parsedQuestion = JSON.parse(content.trim());
+        console.log('Method 1 (direct parse) succeeded:', parsedQuestion);
       } catch {
         // Method 2: Extract JSON with regex
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           try {
             parsedQuestion = JSON.parse(jsonMatch[0]);
+            console.log('Method 2 (regex extraction) succeeded:', parsedQuestion);
           } catch {
             // Method 3: Clean and extract JSON
             const cleanedContent = content
@@ -254,18 +260,37 @@ class OpenRouterService {
               .replace(/^[^{]*/, "")
               .replace(/[^}]*$/, "");
             parsedQuestion = JSON.parse(cleanedContent);
+            console.log('Method 3 (cleaned extraction) succeeded:', parsedQuestion);
           }
         }
       }
 
       // Validate the parsed question
-      if (parsedQuestion && this.validateQuestion(parsedQuestion)) {
-        // Ensure required fields are present
+      console.log('About to validate question:', parsedQuestion);
+      console.log('parsedQuestion exists:', !!parsedQuestion);
+
+      const isValid = this.validateQuestion(parsedQuestion);
+      console.log('Validation result:', isValid);
+
+      if (parsedQuestion && isValid) {
+        console.log('Validation passed, adding required fields...');
+      // Ensure required fields are present and clean up any empty fields
         parsedQuestion.testType = testType;
         parsedQuestion.section = section;
         parsedQuestion.difficulty = difficulty;
+
+        // Remove empty passage or image fields if they exist
+        if (parsedQuestion.passage === "" || parsedQuestion.passage === null) {
+          delete parsedQuestion.passage;
+        }
+        if (parsedQuestion.image === "" || parsedQuestion.image === null) {
+          delete parsedQuestion.image;
+        }
+
+        console.log('Final question object:', parsedQuestion);
         return parsedQuestion;
       } else {
+        console.error('Validation failed - parsedQuestion:', !!parsedQuestion, 'isValid:', isValid);
         throw new Error("Invalid question structure");
       }
     } catch (error) {
@@ -296,25 +321,78 @@ class OpenRouterService {
 
   // Validate question structure
   validateQuestion(question) {
-    return (
-      question &&
-      typeof question.question === "string" &&
-      Array.isArray(question.options) &&
-      question.options.length >= 4 &&
-      typeof question.correctAnswer === "number" &&
-      question.correctAnswer >= 0 &&
-      question.correctAnswer < question.options.length &&
-      typeof question.explanation === "string" &&
-      question.question.length > 10 &&
-      question.explanation.length > 10
-    );
-  }
+    // Add debugging to understand what's failing
+    if (!question) {
+      console.error('Validation failed: question is null/undefined');
+      return false;
+    }
 
-  async evaluatePerformance(testResults, retryCount = 0) {
+    if (typeof question.question !== "string") {
+      console.error('Validation failed: question.question is not a string', typeof question.question);
+      return false;
+    }
+
+    if (!Array.isArray(question.options)) {
+      console.error('Validation failed: question.options is not an array', question.options);
+      return false;
+    }
+
+    if (question.options.length < 4) {
+      console.error('Validation failed: question.options has less than 4 items', question.options.length);
+      return false;
+    }
+
+    if (typeof question.correctAnswer !== "number") {
+      console.error('Validation failed: question.correctAnswer is not a number', typeof question.correctAnswer, question.correctAnswer);
+      return false;
+    }
+
+    if (question.correctAnswer < 0 || question.correctAnswer >= question.options.length) {
+      console.error('Validation failed: question.correctAnswer is out of range', question.correctAnswer, question.options.length);
+      return false;
+    }
+
+    if (typeof question.explanation !== "string") {
+      console.error('Validation failed: question.explanation is not a string', typeof question.explanation);
+      return false;
+    }
+
+    if (question.question.length <= 10) {
+      console.error('Validation failed: question.question is too short', question.question.length);
+      return false;
+    }
+
+    if (question.explanation.length <= 10) {
+      console.error('Validation failed: question.explanation is too short', question.explanation.length);
+      return false;
+    }
+
+    return true;
+  } async evaluatePerformance(testResults, retryCount = 0) {
+    if (!testResults || testResults.length === 0) {
+      return "No test data available for performance analysis.";
+    }
+
     // Extract meaningful patterns from the test data
     const recentTests = testResults.slice(0, 5); // Last 5 tests
-    const totalQuestions = testResults.length;
-    const correctAnswers = testResults.filter((q) => q.isCorrect).length;
+
+    // Calculate overall statistics from all test questions
+    let totalQuestions = 0;
+    let correctAnswers = 0;
+    const allQuestions = [];
+
+    testResults.forEach((test) => {
+      if (test.questions && Array.isArray(test.questions)) {
+        test.questions.forEach((question) => {
+          allQuestions.push(question);
+          totalQuestions++;
+          if (question.isCorrect) {
+            correctAnswers++;
+          }
+        });
+      }
+    });
+
     const accuracy =
       totalQuestions > 0
         ? Math.round((correctAnswers / totalQuestions) * 100)
@@ -324,25 +402,27 @@ class OpenRouterService {
     const sectionPerformance = {};
     const difficultyPerformance = {};
 
-    testResults.forEach((result) => {
+    allQuestions.forEach((question) => {
       // Section analysis
-      if (!sectionPerformance[result.section]) {
-        sectionPerformance[result.section] = {
+      const section = question.section || "Unknown";
+      if (!sectionPerformance[section]) {
+        sectionPerformance[section] = {
           correct: 0,
           total: 0,
           avgTime: 0,
         };
       }
-      sectionPerformance[result.section].total++;
-      if (result.isCorrect) sectionPerformance[result.section].correct++;
-      sectionPerformance[result.section].avgTime += result.timeSpent || 0;
+      sectionPerformance[section].total++;
+      if (question.isCorrect) sectionPerformance[section].correct++;
+      sectionPerformance[section].avgTime += question.timeSpent || 0;
 
       // Difficulty analysis
-      if (!difficultyPerformance[result.difficulty]) {
-        difficultyPerformance[result.difficulty] = { correct: 0, total: 0 };
+      const difficulty = question.difficulty || "Unknown";
+      if (!difficultyPerformance[difficulty]) {
+        difficultyPerformance[difficulty] = { correct: 0, total: 0 };
       }
-      difficultyPerformance[result.difficulty].total++;
-      if (result.isCorrect) difficultyPerformance[result.difficulty].correct++;
+      difficultyPerformance[difficulty].total++;
+      if (question.isCorrect) difficultyPerformance[difficulty].correct++;
     });
 
     // Calculate averages and trends
@@ -358,6 +438,7 @@ PERFORMANCE DATA:
 - Total Questions: ${totalQuestions}
 - Overall Accuracy: ${accuracy}%
 - Test Type: ${testResults[0]?.testType || "Unknown"}
+- Number of Tests Taken: ${testResults.length}
 
 SECTION BREAKDOWN:
 ${Object.entries(sectionPerformance)
@@ -377,14 +458,19 @@ ${Object.entries(difficultyPerformance)
   )
   .join("\n")}
 
-RECENT PERFORMANCE TREND:
+RECENT TEST PERFORMANCE:
 ${recentTests
-  .map(
-    (test, i) =>
-      `Test ${i + 1}: ${test.isCorrect ? "✓" : "✗"} ${test.section} (${
-        test.difficulty
-      }) - ${test.timeSpent || 0}s`
-  )
+      .map((test, i) => {
+        const testCorrect = test.questions
+          ? test.questions.filter((q) => q.isCorrect).length
+          : 0;
+        const testTotal = test.questions ? test.questions.length : 0;
+        const testAccuracy =
+          testTotal > 0 ? Math.round((testCorrect / testTotal) * 100) : 0;
+        return `Test ${i + 1
+          }: ${testAccuracy}% accuracy (${testCorrect}/${testTotal}) - ${test.testType
+          } ${test.section}`;
+      })
   .join("\n")}
 
 Please provide a concise, personalized analysis focusing on:
@@ -535,10 +621,10 @@ Keep recommendations specific to ${testType} format and these exact weak areas. 
       }));
 
       const bestSection = sectionAccuracies.reduce((a, b) =>
-        a.accuracy > b.accuracy ? a : b
+        a.accuracy > b.accuracy ? a : b, sectionAccuracies[0]
       );
       const worstSection = sectionAccuracies.reduce((a, b) =>
-        a.accuracy < b.accuracy ? a : b
+        a.accuracy < b.accuracy ? a : b, sectionAccuracies[0]
       );
 
       if (bestSection.accuracy - worstSection.accuracy > 20) {
@@ -576,48 +662,337 @@ Keep recommendations specific to ${testType} format and these exact weak areas. 
     const lessonPrompts = {
       "vocabulary-basics": `Create an interactive vocabulary lesson for level ${userLevel} students. Include:
         - 5 multiple-choice questions testing vocabulary in context
-        - Words commonly seen on GRE/GMAT tests
+        - Words commonly seen on GRE/GMAT tests (like: ameliorate, ubiquitous, perspicacious, etc.)
         - Engaging explanations with memory techniques
-        - Difficulty appropriate for level ${userLevel}`,
+        - Difficulty appropriate for level ${userLevel}
+        - NO reading passage required - focus on vocabulary in sentence contexts`,
+
+      "advanced-vocabulary": `Create an advanced vocabulary lesson with:
+        - 6 challenging vocabulary questions using sophisticated words
+        - Words like: magnanimous, perfunctory, vacillate, sanguine, etc.
+        - Complex sentence contexts
+        - Level ${userLevel} difficulty
+        - NO reading passage required - use varied sentence contexts`,
+
+      "vocabulary-context": `Create a vocabulary-in-context lesson with:
+        - 5 questions where students must determine word meaning from context
+        - Include context clue strategies
+        - Mixed difficulty vocabulary words
+        - Level ${userLevel} appropriate
+        - NO reading passage required - use diverse sentence examples`,
+
+      "word-roots-prefixes": `Create a word roots and prefixes lesson with:
+        - 5 questions about breaking down unfamiliar words
+        - Focus on common roots (bene-, mal-, -ology, -phobia, etc.)
+        - Include word family connections
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on word analysis`,
+
+      "synonyms-antonyms": `Create a synonyms and antonyms lesson with:
+        - 5 questions testing word relationships
+        - Include nuanced differences between similar words
+        - Both synonym and antonym identification
+        - Level ${userLevel} appropriate
+        - NO reading passage required - use word comparison exercises`,
 
       "reading-strategies": `Create a reading comprehension lesson with:
-        - A short passage (150-200 words)
-        - 4 questions testing different reading skills
+        - A well-structured passage (200-250 words) about science, literature, or social issues
+        - 4 questions testing different reading skills (main idea, inference, details, tone)
         - Strategy tips for each question type
         - Level ${userLevel} difficulty`,
 
+      "passage-analysis": `Create a passage analysis lesson with:
+        - A complex argumentative passage (250-300 words)
+        - 5 questions analyzing structure, evidence, and reasoning
+        - Focus on critical analysis skills
+        - Level ${userLevel} complexity`,
+
+      "main-idea-details": `Create a main idea and supporting details lesson with:
+        - A descriptive or expository passage (200 words)
+        - 4 questions distinguishing main ideas from supporting details
+        - Include passage organization questions
+        - Level ${userLevel} appropriate`,
+
+      "inference-reasoning": `Create an inference and reasoning lesson with:
+        - A nuanced passage requiring careful reading (220-280 words)
+        - 5 questions requiring logical inference
+        - Include "what can be concluded" type questions
+        - Level ${userLevel} complexity`,
+
+      "tone-attitude": `Create a tone and attitude lesson with:
+        - A passage with clear authorial perspective (200-250 words)
+        - 4 questions about author's tone, attitude, and purpose
+        - Include bias detection questions
+        - Level ${userLevel} difficulty`,
+
       "math-foundations": `Create a math fundamentals lesson with:
-        - 5 step-by-step problems
+        - 5 step-by-step arithmetic and basic algebra problems
         - Clear explanations of mathematical concepts
+        - Include word problems and pure math
+        - Level ${userLevel} appropriate difficulty
+        - NO reading passage required - focus on mathematical problem-solving`,
+
+      "arithmetic-basics": `Create an arithmetic essentials lesson with:
+        - 5 problems covering fractions, decimals, percentages
+        - Include practical applications
+        - Step-by-step solution methods
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on numerical calculations`,
+
+      "basic-algebra": `Create a basic algebra lesson with:
+        - 5 linear equation and inequality problems
+        - Include variable manipulation and solving techniques
+        - Mix of pure algebra and word problems
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on algebraic concepts`,
+
+      "advanced-algebra": `Create an advanced algebra lesson with:
+        - 5 complex algebraic problems (polynomials, factoring, exponents)
+        - Include advanced techniques like completing the square
+        - Mix of abstract and applied problems
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on advanced algebraic concepts`,
+
+      "linear-equations": `Create a linear equations lesson with:
+        - 5 problems focusing on solving linear equations and inequalities
+        - Include graphing and system solving techniques
+        - Step-by-step algebraic manipulation
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on linear equation solving`,
+
+      "quadratic-equations": `Create a quadratic equations lesson with:
+        - 5 problems involving quadratic equations and functions
+        - Include factoring, quadratic formula, and graphing
+        - Real-world applications of quadratics
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on quadratic problem solving`,
+
+      "systems-equations": `Create a systems of equations lesson with:
+        - 5 problems solving multiple equations simultaneously
+        - Include substitution and elimination methods
+        - Mix of linear and non-linear systems
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on system solving techniques`,
+
+      "fractions-decimals": `Create a fractions and decimals lesson with:
+        - 5 problems covering fraction operations and decimal conversions
+        - Include mixed numbers and complex fraction operations
+        - Practical applications and comparisons
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on fraction/decimal calculations`,
+
+      "percentages-ratios": `Create a percentages and ratios lesson with:
+        - 5 problems involving percentage calculations and ratio/proportion
+        - Include percent change, ratio comparisons, and scaling
+        - Real-world applications (discounts, tips, proportional reasoning)
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on percentage and ratio problems`,
+
+      "geometry-basics": `Create a geometry fundamentals lesson with:
+        - 5 problems involving area, perimeter, angles, and basic shapes
+        - Include coordinate geometry concepts
         - Visual problem-solving techniques
-        - Level ${userLevel} appropriate difficulty`,
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on geometric calculations`,
+
+      "coordinate-geometry": `Create a coordinate geometry lesson with:
+        - 5 problems involving points, lines, and shapes on coordinate plane
+        - Include distance formula, midpoint, and slope calculations
+        - Graphing and coordinate transformations
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on coordinate geometry concepts`,
+
+      "triangles-polygons": `Create a triangles and polygons lesson with:
+        - 5 problems focusing on triangle properties and polygon characteristics
+        - Include area calculations, angle relationships, and similarity
+        - Mix of right triangles and general triangle problems
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on triangle and polygon properties`,
+
+      "circles-arcs": `Create a circles and arcs lesson with:
+        - 5 problems involving circle properties and arc measurements
+        - Include circumference, area, central/inscribed angles
+        - Sector and arc length calculations
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on circle geometry`,
+
+      "solid-geometry": `Create a 3D geometry lesson with:
+        - 5 problems calculating volumes and surface areas of 3D shapes
+        - Include cubes, spheres, cylinders, pyramids, and prisms
+        - Real-world applications of 3D measurements
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on 3D geometric calculations`,
+
+      "data-interpretation": `Create a data interpretation lesson with:
+        - 4 problems analyzing charts, graphs, and tables
+        - Include percentage calculations and comparisons
+        - Real-world data scenarios
+        - Level ${userLevel} complexity
+        - NO reading passage required - focus on data analysis skills`,
+
+      "statistics-basics": `Create a statistics fundamentals lesson with:
+        - 5 problems involving mean, median, mode, and range calculations
+        - Include data set analysis and interpretation
+        - Mix of discrete and continuous data problems
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on basic statistical concepts`,
+
+      "probability-basics": `Create a probability concepts lesson with:
+        - 5 problems calculating basic probabilities and chance
+        - Include combinations, permutations, and conditional probability
+        - Real-world probability scenarios
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on probability calculations`,
+
+      "advanced-statistics": `Create an advanced statistics lesson with:
+        - 5 problems involving standard deviation, correlation, and distributions
+        - Include normal distribution and statistical inference
+        - Complex statistical analysis scenarios
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on advanced statistical concepts`,
 
       "critical-reasoning": `Create a critical reasoning lesson with:
-        - 4 logical reasoning problems
+        - 4 logical reasoning problems with clear arguments
         - Different argument types (strengthen, weaken, assumption)
         - Clear explanation of logical structures
-        - Level ${userLevel} complexity`,
+        - Level ${userLevel} complexity
+        - NO reading passage required - focus on argument analysis`,
+
+      "argument-structure": `Create an argument structure lesson with:
+        - 5 problems analyzing logical arguments
+        - Focus on premises, conclusions, and logical flow
+        - Include argument identification and evaluation
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on logical reasoning`,
+
+      "problem-solving-strategies": `Create a problem-solving strategies lesson with:
+        - 4 multi-step problems requiring strategic thinking
+        - Include estimation and elimination techniques
+        - Mix of verbal and quantitative reasoning
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on strategic problem solving`,
+
+      "estimation-techniques": `Create an estimation and approximation lesson with:
+        - 5 problems focusing on quick calculation methods
+        - Include rounding, benchmarking, and mental math
+        - Time-saving estimation strategies
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on estimation skills`,
+
+      "time-management": `Create a time management lesson with:
+        - 4 practice scenarios with time constraints
+        - Include pacing strategies and priority setting
+        - Test-taking time optimization techniques
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on time management strategies`,
+
+      "elimination-strategies": `Create an answer elimination lesson with:
+        - 5 problems demonstrating elimination techniques
+        - Include logical reasoning and process of elimination
+        - Strategic approach to multiple choice questions
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on elimination strategies`,
+
+      "exponentials-logarithms": `Create an exponentials and logarithms lesson with:
+        - 5 problems involving exponential and logarithmic functions
+        - Include growth/decay models and logarithmic properties
+        - Advanced mathematical applications
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on exponential and logarithmic concepts`,
+
+      "sequences-series": `Create a sequences and series lesson with:
+        - 5 problems involving arithmetic and geometric sequences
+        - Include series summation and pattern recognition
+        - Mathematical sequence applications
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on sequence and series concepts`,
+
+      "grammar-essentials": `Create a grammar essentials lesson with:
+        - 5 problems focusing on fundamental grammar rules
+        - Include subject-verb agreement, tense consistency, and punctuation
+        - Common grammar errors and corrections
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on grammar fundamentals`,
+
+      "sentence-structure": `Create a sentence structure lesson with:
+        - 5 problems improving sentence clarity and style
+        - Include parallel structure, modifier placement, and conciseness
+        - Sentence combining and revision techniques
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on sentence construction`,
+
+      "essay-writing": `Create an essay writing strategies lesson with:
+        - 4 problems focusing on essay structure and organization
+        - Include thesis development, paragraph structure, and transitions
+        - Argumentative and analytical writing techniques
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on essay writing skills`,
+
+      "rhetorical-analysis": `Create a rhetorical analysis lesson with:
+        - 4 problems analyzing rhetorical devices and effectiveness
+        - Include ethos, pathos, logos, and persuasive techniques
+        - Critical analysis of argumentative strategies
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on rhetorical analysis skills`,
+
+      "gre-specific-strategies": `Create a GRE-specific strategies lesson with:
+        - 5 problems using GRE-specific techniques and approaches
+        - Include text completion, sentence equivalence, and quantitative comparison
+        - GRE format-specific strategies
+        - Level ${userLevel} appropriate
+        - NO reading passage required - focus on GRE-specific techniques`,
+
+      "gmat-specific-strategies": `Create a GMAT-specific strategies lesson with:
+        - 5 problems using GMAT-specific techniques and approaches
+        - Include data sufficiency, critical reasoning, and integrated reasoning
+        - GMAT format-specific strategies
+        - Level ${userLevel} difficulty
+        - NO reading passage required - focus on GMAT-specific techniques`,
     };
+
+    // Determine if this module needs a passage
+    const passageModules = [
+      "reading-strategies",
+      "passage-analysis",
+      "main-idea-details",
+      "inference-reasoning",
+      "tone-attitude",
+    ];
+
+    const requiresPassage = passageModules.includes(moduleId);
+
+    const baseStructure = {
+      id: `${moduleId}-lesson-${Date.now()}`,
+      title: "Engaging Lesson Title",
+      description: "Brief lesson description",
+      questions: [
+        {
+          question: "Question text with context",
+          options: ["Option A", "Option B", "Option C", "Option D"],
+          correctAnswer: 0,
+          explanation:
+            "Detailed explanation with learning tips and strategy advice",
+        },
+      ],
+      tips: ["Study tip 1", "Study tip 2", "Strategy tip 3"],
+      nextSteps: "What to practice next",
+    };
+
+    if (requiresPassage) {
+      baseStructure.passage =
+        "Include a well-written passage here for reading comprehension";
+    }
 
     const prompt = `${
       lessonPrompts[moduleId] || lessonPrompts["vocabulary-basics"]
     }
 
-IMPORTANT: Return ONLY a valid JSON object with this structure:
-{
-  "id": "${moduleId}-lesson-${Date.now()}",
-  "title": "Engaging Lesson Title",
-  "description": "Brief lesson description",
-  "questions": [
-    {
-      "question": "Question text with context",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": 0,
-      "explanation": "Detailed explanation with learning tips"
-    }
-  ],
-  "tips": ["Study tip 1", "Study tip 2"],
-  "nextSteps": "What to practice next"
+IMPORTANT: Return ONLY a valid JSON object with this exact structure:
+${JSON.stringify(baseStructure, null, 2)}
+
+${requiresPassage
+        ? "This module requires a reading passage. Include a substantive, well-written passage of 200-300 words."
+        : "This module does NOT require a reading passage. Focus on individual questions with context."
 }
 
 Make it engaging, educational, and fun like Duolingo!`;

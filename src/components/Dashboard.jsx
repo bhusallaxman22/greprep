@@ -294,7 +294,15 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
               Quick Insight
             </Typography>
             <Typography variant="body1">
-              {openRouterService.generateQuickInsights(stats)[0] || "Keep practicing to improve your performance!"}
+              {(() => {
+                try {
+                  const insights = openRouterService.generateQuickInsights(stats);
+                  return insights[0] || "Keep practicing to improve your performance!";
+                } catch (error) {
+                  console.error('Error generating quick insights:', error);
+                  return "Keep practicing to improve your performance!";
+                }
+              })()}
             </Typography>
           </Alert>
         </Box>

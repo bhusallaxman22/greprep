@@ -1008,6 +1008,36 @@ const LessonContent = ({ lesson, onComplete }) => {
         ))}
       </Stepper>
 
+      {/* Passage Display (if exists) */}
+      {lesson.passage && (
+        <Paper 
+          elevation={2} 
+          sx={{ 
+            p: 3, 
+            mb: 3, 
+            bgcolor: 'grey.50',
+            border: '1px solid',
+            borderColor: 'grey.200'
+          }}
+        >
+          <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', display: 'flex', alignItems: 'center' }}>
+            <School sx={{ mr: 1 }} />
+            Reading Passage
+          </Typography>
+          <Typography 
+            variant="body1" 
+            sx={{ 
+              lineHeight: 1.8,
+              fontSize: '1.05rem',
+              textAlign: 'justify',
+              whiteSpace: 'pre-line'
+            }}
+          >
+            {lesson.passage}
+          </Typography>
+        </Paper>
+      )}
+
       <Card sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography variant="h6">

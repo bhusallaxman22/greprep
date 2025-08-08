@@ -110,26 +110,49 @@ function AppContent() {
     setAppState(APP_STATES.TEST_IN_PROGRESS);
     
     // Start generating the first question
-    await generateQuestion(0, config);
+    await generateQuestion(0, false, config);
   };
 
-  const generateQuestion = async (questionIndex, config = testConfig) => {
-    setIsLoadingQuestion(true);
+    const generateQuestion = async (questionIndex, isPreload = false, config = null) => {
+    if (!isPreload) {
+      setIsLoadingQuestion(true);
+    }
     try {
+      const currentConfig = config || testConfig;
       const question = await openRouterService.generateQuestion(
-        config.testType,
-        config.section,
-        config.difficulty
+        currentConfig.testType,
+        currentConfig.section,
+        currentConfig.difficulty
       );
       
+      // Update questions array at specific index
       const newQuestions = [...questions];
       newQuestions[questionIndex] = question;
       setQuestions(newQuestions);
+
+      // Preload the next 2 questions in the background if this is not already a preload
+      if (!isPreload && questionIndex < currentConfig.questionCount - 1) {
+        // Preload next question
+        const nextIndex = questionIndex + 1;
+        if (!questions[nextIndex]) {
+          setTimeout(() => generateQuestion(nextIndex, true), 500);
+        }
+        
+        // Preload the question after next if it exists
+        const nextNextIndex = questionIndex + 2;
+        if (nextNextIndex < currentConfig.questionCount && !questions[nextNextIndex]) {
+          setTimeout(() => generateQuestion(nextNextIndex, true), 1000);
+        }
+      }
     } catch (error) {
       console.error('Failed to generate question:', error);
-      showError('Failed to generate question. Please check your OpenRouter API configuration.');
+      if (!isPreload) {
+        showError('Failed to generate question. Please try again.');
+      }
     } finally {
-      setIsLoadingQuestion(false);
+      if (!isPreload) {
+        setIsLoadingQuestion(false);
+      }
     }
   };
 
@@ -147,9 +170,20 @@ function AppContent() {
     if (nextIndex < testConfig.questionCount) {
       setCurrentQuestionIndex(nextIndex);
       
-      // Generate next question if it doesn't exist
+      // If the next question doesn't exist, generate it
       if (!questions[nextIndex]) {
         await generateQuestion(nextIndex);
+      } else {
+        // If the question already exists, still trigger preloading of upcoming questions
+        const nextNextIndex = nextIndex + 1;
+        if (nextNextIndex < testConfig.questionCount && !questions[nextNextIndex]) {
+          setTimeout(() => generateQuestion(nextNextIndex, true), 100);
+        }
+        
+        const nextNextNextIndex = nextIndex + 2;
+        if (nextNextNextIndex < testConfig.questionCount && !questions[nextNextNextIndex]) {
+          setTimeout(() => generateQuestion(nextNextNextIndex, true), 300);
+        }
       }
     }
   };
@@ -284,6 +318,7 @@ function AppContent() {
                   onFinish={finishTest}
                   selectedAnswer={currentAnswer?.answerIndex}
                   isLoading={isLoadingQuestion}
+                  questionsArray={questions}
                 />
               )}
 
