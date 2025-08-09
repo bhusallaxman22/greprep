@@ -585,6 +585,284 @@ Keep it concise (under 300 words), specific to their data, and immediately actio
     }
   }
 
+  // Enhanced method that supports both text and JSON formats for AI insights
+  async evaluatePerformanceWithFormat(testResults, returnFormat = 'text', retryCount = 0) {
+    if (!testResults || testResults.length === 0) {
+      return returnFormat === 'json'
+        ? { error: "No test data available for performance analysis." }
+        : "No test data available for performance analysis.";
+    }
+
+    // Extract meaningful patterns from the test data
+    const recentTests = testResults.slice(0, 5); // Last 5 tests
+
+    // Calculate overall statistics from all test questions
+    let totalQuestions = 0;
+    let correctAnswers = 0;
+    const allQuestions = [];
+
+    testResults.forEach((test) => {
+      if (test.questions && Array.isArray(test.questions)) {
+        test.questions.forEach((question) => {
+          allQuestions.push(question);
+          totalQuestions++;
+          if (question.isCorrect) {
+            correctAnswers++;
+          }
+        });
+      }
+    });
+
+    const accuracy =
+      totalQuestions > 0
+        ? Math.round((correctAnswers / totalQuestions) * 100)
+        : 0;
+
+    // Analyze patterns
+    const sectionPerformance = {};
+    const difficultyPerformance = {};
+
+    allQuestions.forEach((question) => {
+      // Section analysis
+      const section = question.section || "Unknown";
+      if (!sectionPerformance[section]) {
+        sectionPerformance[section] = {
+          correct: 0,
+          total: 0,
+          avgTime: 0,
+        };
+      }
+      sectionPerformance[section].total++;
+      if (question.isCorrect) sectionPerformance[section].correct++;
+      sectionPerformance[section].avgTime += question.timeSpent || 0;
+
+      // Difficulty analysis
+      const difficulty = question.difficulty || "Unknown";
+      if (!difficultyPerformance[difficulty]) {
+        difficultyPerformance[difficulty] = { correct: 0, total: 0 };
+      }
+      difficultyPerformance[difficulty].total++;
+      if (question.isCorrect) difficultyPerformance[difficulty].correct++;
+    });
+
+    // Calculate averages and trends
+    Object.keys(sectionPerformance).forEach((section) => {
+      const data = sectionPerformance[section];
+      data.accuracy = Math.round((data.correct / data.total) * 100);
+      data.avgTime = Math.round(data.avgTime / data.total);
+    });
+
+    const basePrompt = `As an expert test prep tutor, analyze this student's performance data and provide specific, actionable insights:
+
+PERFORMANCE DATA:
+- Total Questions: ${totalQuestions}
+- Overall Accuracy: ${accuracy}%
+- Test Type: ${testResults[0]?.testType || "Unknown"}
+- Number of Tests Taken: ${testResults.length}
+
+SECTION BREAKDOWN:
+${Object.entries(sectionPerformance)
+        .map(
+          ([section, data]) =>
+            `${section}: ${data.accuracy}% accuracy (${data.correct}/${data.total}), avg ${data.avgTime}s per question`
+        )
+        .join("\n")}
+
+DIFFICULTY BREAKDOWN:
+${Object.entries(difficultyPerformance)
+        .map(
+          ([difficulty, data]) =>
+            `${difficulty}: ${Math.round(
+              (data.correct / data.total) * 100
+            )}% accuracy (${data.correct}/${data.total})`
+        )
+        .join("\n")}
+
+RECENT TEST PERFORMANCE:
+${recentTests
+        .map((test, i) => {
+          const testCorrect = test.questions
+            ? test.questions.filter((q) => q.isCorrect).length
+            : 0;
+          const testTotal = test.questions ? test.questions.length : 0;
+          const testAccuracy =
+            testTotal > 0 ? Math.round((testCorrect / testTotal) * 100) : 0;
+          return `Test ${i + 1
+            }: ${testAccuracy}% accuracy (${testCorrect}/${testTotal}) - ${test.testType
+            } ${test.section}`;
+        })
+        .join("\n")}`;
+
+    let prompt;
+    if (returnFormat === 'json') {
+      // Find strongest and weakest sections
+      const sortedSections = Object.entries(sectionPerformance).sort((a, b) => b[1].accuracy - a[1].accuracy);
+      const strongestSection = sortedSections[0] ? sortedSections[0][0] : "N/A";
+      const weakestSection = sortedSections[sortedSections.length - 1] ? sortedSections[sortedSections.length - 1][0] : "N/A";
+
+      prompt = `${basePrompt}
+
+Return your analysis as a JSON object with the following structure:
+{
+  "keyInsights": {
+    "title": "Key Insights",
+    "content": "What specific patterns do you see? What's the student doing well vs struggling with?",
+    "icon": "lightbulb",
+    "severity": "info"
+  },
+  "priorityActions": {
+    "title": "Priority Actions", 
+    "content": "What should they focus on FIRST to get the biggest improvement?",
+    "icon": "flag",
+    "severity": "warning"
+  },
+  "studyPlan": {
+    "title": "Study Plan",
+    "items": [
+      "Concrete actionable step 1",
+      "Concrete actionable step 2", 
+      "Concrete actionable step 3"
+    ],
+    "icon": "book",
+    "severity": "success"
+  },
+  "testStrategy": {
+    "title": "Test-Taking Strategy",
+    "content": "Specific advice for timing, question approach, or test day tactics",
+    "icon": "psychology",
+    "severity": "info"
+  },
+  "motivation": {
+    "title": "Motivation & Goals",
+    "content": "One encouraging insight and realistic expectation for improvement",
+    "icon": "trending_up",
+    "severity": "success"
+  },
+  "stats": {
+    "overallScore": ${accuracy},
+    "strongestSection": "${strongestSection}",
+    "weakestSection": "${weakestSection}",
+    "totalQuestions": ${totalQuestions},
+    "testsCompleted": ${testResults.length}
+  }
+}
+
+Keep each content section concise (under 100 words), specific to their data, and immediately actionable. Avoid generic advice.`;
+    } else {
+      prompt = `${basePrompt}
+
+Please provide a concise, personalized analysis focusing on:
+
+1. **Key Insights**: What specific patterns do you see? What's the student doing well vs struggling with?
+
+2. **Priority Actions**: What should they focus on FIRST to get the biggest improvement?
+
+3. **Specific Study Plan**: Give 3-4 concrete, actionable steps they can take this week.
+
+4. **Test-Taking Strategy**: Any specific advice for timing, question approach, or test day tactics?
+
+5. **Motivation**: One encouraging insight and realistic expectation for improvement.
+
+Keep it concise (under 300 words), specific to their data, and immediately actionable. Avoid generic advice.`;
+    }
+
+    const data = {
+      model: "google/gemma-3-4b-it",
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: returnFormat === 'json' ? 2000 : 1500,
+    };
+
+    try {
+      const response = await this.makeRequest("/chat/completions", data);
+      const content = response.choices[0].message.content;
+
+      if (returnFormat === 'json') {
+        try {
+          // Try to parse as JSON
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error('No JSON found in response');
+          }
+        } catch (parseError) {
+          console.error('Failed to parse JSON response:', parseError);
+          // Return a fallback structured object
+          const sortedSections = Object.entries(sectionPerformance).sort((a, b) => b[1].accuracy - a[1].accuracy);
+          const strongestSection = sortedSections[0] ? sortedSections[0][0] : "N/A";
+          const weakestSection = sortedSections[sortedSections.length - 1] ? sortedSections[sortedSections.length - 1][0] : "N/A";
+
+          return {
+            keyInsights: {
+              title: "Key Insights",
+              content: "Analysis completed. Please check your performance data for detailed insights.",
+              icon: "lightbulb",
+              severity: "info"
+            },
+            priorityActions: {
+              title: "Priority Actions",
+              content: "Focus on practicing your weakest sections and review missed questions.",
+              icon: "flag",
+              severity: "warning"
+            },
+            studyPlan: {
+              title: "Study Plan",
+              items: [
+                "Review incorrect answers and explanations",
+                "Practice timed sections to improve speed",
+                "Focus on your weakest question types"
+              ],
+              icon: "book",
+              severity: "success"
+            },
+            testStrategy: {
+              title: "Test-Taking Strategy",
+              content: "Manage your time effectively and read questions carefully before answering.",
+              icon: "psychology",
+              severity: "info"
+            },
+            motivation: {
+              title: "Motivation & Goals",
+              content: "You're making progress! Keep practicing consistently to see continued improvement.",
+              icon: "trending_up",
+              severity: "success"
+            },
+            stats: {
+              overallScore: accuracy,
+              strongestSection: strongestSection,
+              weakestSection: weakestSection,
+              totalQuestions: totalQuestions,
+              testsCompleted: testResults.length
+            }
+          };
+        }
+      }
+
+      return content;
+    } catch (error) {
+      console.error(
+        `Failed to evaluate performance (attempt ${retryCount + 1}):`,
+        error
+      );
+
+      if (retryCount < this.maxRetries) {
+        await this.delay(this.calculateDelay(retryCount));
+        return this.evaluatePerformanceWithFormat(testResults, returnFormat, retryCount + 1);
+      }
+
+      if (returnFormat === 'json') {
+        return { error: "Performance evaluation is temporarily unavailable. Please try again later." };
+      }
+      return "Performance evaluation is temporarily unavailable. Please try again later.";
+    }
+  }
+
   async getStudyRecommendations(weakAreas, testType, retryCount = 0) {
     const prompt = `As a ${testType} test prep expert, provide specific, actionable study recommendations for a student struggling with: ${weakAreas.join(
       ", "

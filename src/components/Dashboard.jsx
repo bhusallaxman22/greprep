@@ -34,31 +34,40 @@ import {
   ExpandMore,
   Lightbulb,
   FlagOutlined,
-  Schedule,
   BookmarkBorder,
   Psychology,
   TipsAndUpdates,
   AutoAwesome,
   Speed,
-  EmojiEvents,
   PlayArrow,
   PieChart,
   History,
 } from "@mui/icons-material";
-import { useAuth } from '../context/AuthContext';
-import firebaseService from '../services/firebase';
-import openRouterService from '../services/openrouter';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAuth } from "../context/AuthContext";
+import firebaseService from "../services/firebase";
+import openRouterService from "../services/openrouter";
+import AIInsights from "./AIInsights";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 const Dashboard = ({ onStartTest, onStartLearning }) => {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
-  const [aiEvaluation, setAiEvaluation] = useState('');
+  const [aiEvaluation, setAiEvaluation] = useState("");
+  const [aiInsights, setAiInsights] = useState(null); // New state for JSON insights
   const [loadingStats, setLoadingStats] = useState(true);
   const [loadingAI, setLoadingAI] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [aiInsightsExpanded, setAiInsightsExpanded] = useState(true);
   const [cachedAIEvaluation, setCachedAIEvaluation] = useState(null);
+  const [cachedAIInsights, setCachedAIInsights] = useState(null); // New cached insights
   const [lastStatsHash, setLastStatsHash] = useState("");
 
   // Handler functions
@@ -95,20 +104,34 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
       // Get AI evaluation if user has taken tests
       if (userStats.totalTests > 0) {
         // Check if we can use cached evaluation
-        if (cachedAIEvaluation && lastStatsHash === currentStatsHash) {
-          console.log("Using cached AI evaluation");
+        if (
+          cachedAIEvaluation &&
+          cachedAIInsights &&
+          lastStatsHash === currentStatsHash
+        ) {
+          console.log("Using cached AI evaluation and insights");
           setAiEvaluation(cachedAIEvaluation);
+          setAiInsights(cachedAIInsights);
         } else {
           setLoadingAI(true);
           try {
             const testResults = await firebaseService.getUserTestResults(
               user.uid
             );
-            const evaluation = await openRouterService.evaluatePerformance(
-              testResults.slice(0, 3)
-            );
+
+            // Get both text and JSON format insights
+            const [evaluation, insights] = await Promise.all([
+              openRouterService.evaluatePerformance(testResults.slice(0, 3)),
+              openRouterService.evaluatePerformanceWithFormat(
+                testResults.slice(0, 3),
+                "json"
+              ),
+            ]);
+
             setAiEvaluation(evaluation);
+            setAiInsights(insights);
             setCachedAIEvaluation(evaluation);
+            setCachedAIInsights(insights);
             setLastStatsHash(currentStatsHash);
             console.log("Generated new AI evaluation and cached it");
           } catch (aiError) {
@@ -132,7 +155,7 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
       );
       setLoadingStats(false);
     }
-  }, [user.uid, cachedAIEvaluation, lastStatsHash]);
+  }, [user.uid, cachedAIEvaluation, cachedAIInsights, lastStatsHash]);
 
   useEffect(() => {
     if (user) {
@@ -141,28 +164,35 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
   }, [user, loadDashboardData]);
 
   const getAccuracyColor = (accuracy) => {
-    if (accuracy >= 80) return 'success';
-    if (accuracy >= 60) return 'warning';
-    return 'error';
+    if (accuracy >= 80) return "success";
+    if (accuracy >= 60) return "warning";
+    return "error";
   };
 
   const getImprovementIcon = (trend) => {
     if (trend > 0) return <TrendingUp color="success" />;
-    if (trend < 0) return <TrendingUp color="error" sx={{ transform: 'rotate(180deg)' }} />;
+    if (trend < 0)
+      return <TrendingUp color="error" sx={{ transform: "rotate(180deg)" }} />;
     return <Timeline color="action" />;
   };
 
   // Parse and render AI evaluation with beautiful formatting
   const renderAIEvaluation = (evaluation) => {
     // Check if it's a simple insight or structured analysis
-    if (evaluation.includes('🎯') || evaluation.includes('📈') || evaluation.includes('🔄')) {
+    if (
+      evaluation.includes("🎯") ||
+      evaluation.includes("📈") ||
+      evaluation.includes("🔄")
+    ) {
       // Simple insights format
-      const insights = evaluation.split('\n\n').filter(insight => insight.trim());
+      const insights = evaluation
+        .split("\n\n")
+        .filter((insight) => insight.trim());
       return (
         <Grid container spacing={2}>
           {insights.map((insight, index) => (
             <Grid item xs={12} md={6} key={index}>
-              <Card variant="outlined" sx={{ p: 2, height: '100%' }}>
+              <Card variant="outlined" sx={{ p: 2, height: "100%" }}>
                 <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
                   {insight.trim()}
                 </Typography>
@@ -175,7 +205,7 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
 
     // Split the evaluation into sections based on common patterns
     const sections = evaluation.split(/(?=\*\*|📚|🎯|📖|⚡|\d+\.|##|###)/);
-    
+
     return (
       <Box>
         {sections.map((section, index) => {
@@ -183,15 +213,20 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
           if (!trimmedSection) return null;
 
           // Key Insights Section
-          if (trimmedSection.includes('Key Insights') || trimmedSection.includes('insights')) {
+          if (
+            trimmedSection.includes("Key Insights") ||
+            trimmedSection.includes("insights")
+          ) {
             return (
               <Box key={index} sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
                   <Lightbulb color="primary" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="primary">Key Insights</Typography>
+                  <Typography variant="h6" color="primary">
+                    Key Insights
+                  </Typography>
                 </Box>
                 <Typography variant="body1" sx={{ mb: 2, lineHeight: 1.6 }}>
-                  {trimmedSection.replace(/\*\*Key Insights\*\*:?/i, '').trim()}
+                  {trimmedSection.replace(/\*\*Key Insights\*\*:?/i, "").trim()}
                 </Typography>
                 <Divider sx={{ mb: 2 }} />
               </Box>
@@ -199,16 +234,23 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
           }
 
           // Priority Actions Section
-          if (trimmedSection.includes('Priority Actions') || trimmedSection.includes('focus')) {
+          if (
+            trimmedSection.includes("Priority Actions") ||
+            trimmedSection.includes("focus")
+          ) {
             return (
               <Box key={index} sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
                   <FlagOutlined color="secondary" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="secondary">Priority Actions</Typography>
+                  <Typography variant="h6" color="secondary">
+                    Priority Actions
+                  </Typography>
                 </Box>
                 <Alert severity="info" sx={{ mb: 2 }}>
                   <Typography variant="body1">
-                    {trimmedSection.replace(/\*\*Priority Actions\*\*:?/i, '').trim()}
+                    {trimmedSection
+                      .replace(/\*\*Priority Actions\*\*:?/i, "")
+                      .trim()}
                   </Typography>
                 </Alert>
                 <Divider sx={{ mb: 2 }} />
@@ -217,24 +259,31 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
           }
 
           // Study Plan Section
-          if (trimmedSection.includes('Study Plan') || trimmedSection.includes('study')) {
+          if (
+            trimmedSection.includes("Study Plan") ||
+            trimmedSection.includes("study")
+          ) {
             const planItems = trimmedSection.split(/[-•]/);
             return (
               <Box key={index} sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
                   <BookmarkBorder color="success" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="success.main">Study Plan</Typography>
+                  <Typography variant="h6" color="success.main">
+                    Study Plan
+                  </Typography>
                 </Box>
                 <List dense>
                   {planItems.slice(1).map((item, i) => (
                     <ListItem key={i}>
                       <ListItemIcon>
-                        <Box sx={{ 
-                          width: 8, 
-                          height: 8, 
-                          borderRadius: '50%', 
-                          bgcolor: 'success.main' 
-                        }} />
+                        <Box
+                          sx={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            bgcolor: "success.main",
+                          }}
+                        />
                       </ListItemIcon>
                       <ListItemText primary={item.trim()} />
                     </ListItem>
@@ -246,16 +295,21 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
           }
 
           // Test-Taking Strategy Section
-          if (trimmedSection.includes('Strategy') || trimmedSection.includes('test-taking')) {
+          if (
+            trimmedSection.includes("Strategy") ||
+            trimmedSection.includes("test-taking")
+          ) {
             return (
               <Box key={index} sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
                   <Psychology color="warning" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="warning.main">Test-Taking Strategy</Typography>
+                  <Typography variant="h6" color="warning.main">
+                    Test-Taking Strategy
+                  </Typography>
                 </Box>
-                <Card variant="outlined" sx={{ bgcolor: 'warning.50', p: 2 }}>
+                <Card variant="outlined" sx={{ bgcolor: "warning.50", p: 2 }}>
                   <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
-                    {trimmedSection.replace(/\*\*.*Strategy\*\*:?/i, '').trim()}
+                    {trimmedSection.replace(/\*\*.*Strategy\*\*:?/i, "").trim()}
                   </Typography>
                 </Card>
                 <Divider sx={{ mb: 2 }} />
@@ -264,16 +318,21 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
           }
 
           // Motivation Section
-          if (trimmedSection.includes('Motivation') || trimmedSection.includes('encouraging')) {
+          if (
+            trimmedSection.includes("Motivation") ||
+            trimmedSection.includes("encouraging")
+          ) {
             return (
               <Box key={index} sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
                   <TipsAndUpdates color="primary" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="primary">Motivation & Goals</Typography>
+                  <Typography variant="h6" color="primary">
+                    Motivation & Goals
+                  </Typography>
                 </Box>
                 <Alert severity="success" sx={{ mb: 2 }}>
                   <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                    {trimmedSection.replace(/\*\*Motivation\*\*:?/i, '').trim()}
+                    {trimmedSection.replace(/\*\*Motivation\*\*:?/i, "").trim()}
                   </Typography>
                 </Alert>
               </Box>
@@ -310,11 +369,13 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
     );
   }
 
-  const chartData = stats ? Object.keys(stats.sectionBreakdown).map(section => ({
-    section,
-    accuracy: Math.round(stats.sectionBreakdown[section].accuracy),
-    total: stats.sectionBreakdown[section].total
-  })) : [];
+  const chartData = stats
+    ? Object.keys(stats.sectionBreakdown).map((section) => ({
+        section,
+        accuracy: Math.round(stats.sectionBreakdown[section].accuracy),
+        total: stats.sectionBreakdown[section].total,
+      }))
+    : [];
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -839,20 +900,11 @@ const Dashboard = ({ onStartTest, onStartLearning }) => {
                 </Box>
               </AccordionSummary>
               <AccordionDetails>
-                {loadingAI ? (
-                  <Box
-                    sx={{
-                      display: "flex",
-                      justifyContent: "center",
-                      alignItems: "center",
-                      py: 4,
-                    }}
-                  >
-                    <CircularProgress size={32} sx={{ mr: 2 }} />
-                    <Typography color="text.secondary">
-                      Analyzing your performance...
-                    </Typography>
-                  </Box>
+                {/* Use new AIInsights component for JSON insights */}
+                {aiInsights && !loadingAI ? (
+                  <AIInsights insights={aiInsights} isLoading={false} />
+                ) : loadingAI ? (
+                  <AIInsights insights={null} isLoading={true} />
                 ) : aiEvaluation ? (
                   <Box sx={{ mt: 2 }}>{renderAIEvaluation(aiEvaluation)}</Box>
                 ) : stats && stats.totalTests > 0 ? (

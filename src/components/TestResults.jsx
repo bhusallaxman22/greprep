@@ -26,31 +26,47 @@ import {
   Assessment
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import AIInsights from "./AIInsights";
 
 const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
   const [aiEvaluation, setAiEvaluation] = useState('');
+  const [aiInsights, setAiInsights] = useState(null);
   const [isLoadingEvaluation, setIsLoadingEvaluation] = useState(false);
 
   useEffect(() => {
     if (testResult) {
+      const loadAIEvaluation = async () => {
+        setIsLoadingEvaluation(true);
+        try {
+          // Import the service here to avoid circular dependencies
+          const { default: openRouterService } = await import(
+            "../services/openrouter"
+          );
+
+          // Get both text and JSON format insights
+          const [evaluation, insights] = await Promise.all([
+            openRouterService.evaluatePerformance([testResult]),
+            openRouterService.evaluatePerformanceWithFormat(
+              [testResult],
+              "json"
+            ),
+          ]);
+
+          setAiEvaluation(evaluation);
+          setAiInsights(insights);
+        } catch (error) {
+          console.error("AI evaluation failed:", error);
+          setAiEvaluation(
+            "AI evaluation temporarily unavailable. Please check your OpenRouter API configuration."
+          );
+        } finally {
+          setIsLoadingEvaluation(false);
+        }
+      };
+
       loadAIEvaluation();
     }
-  }, [testResult]); // loadAIEvaluation is defined inside this component and doesn't need to be in deps
-
-  const loadAIEvaluation = async () => {
-    setIsLoadingEvaluation(true);
-    try {
-      // Import the service here to avoid circular dependencies
-      const { default: openRouterService } = await import('../services/openrouter');
-      const evaluation = await openRouterService.evaluatePerformance([testResult]);
-      setAiEvaluation(evaluation);
-    } catch (error) {
-      console.error('AI evaluation failed:', error);
-      setAiEvaluation('AI evaluation temporarily unavailable. Please check your OpenRouter API configuration.');
-    } finally {
-      setIsLoadingEvaluation(false);
-    }
-  };
+  }, [testResult]);
 
   if (!testResult) {
     return (
@@ -92,8 +108,13 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       {/* Header */}
-      <Box sx={{ textAlign: 'center', mb: 4 }}>
-        <Typography variant="h3" component="h1" gutterBottom sx={{ fontWeight: 300 }}>
+      <Box sx={{ textAlign: "center", mb: 4 }}>
+        <Typography
+          variant="h3"
+          component="h1"
+          gutterBottom
+          sx={{ fontWeight: 300 }}
+        >
           Test Results
         </Typography>
         <Typography variant="h6" color="text.secondary">
@@ -105,7 +126,7 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
           <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
+            <CardContent sx={{ textAlign: "center" }}>
               <Assessment color="primary" sx={{ fontSize: 40, mb: 1 }} />
               <Typography variant="h4" color={getAccuracyColor(accuracy)}>
                 {accuracy}%
@@ -119,7 +140,7 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
 
         <Grid item xs={12} sm={6} md={3}>
           <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
+            <CardContent sx={{ textAlign: "center" }}>
               <CheckCircle color="success" sx={{ fontSize: 40, mb: 1 }} />
               <Typography variant="h4" color="success.main">
                 {correctAnswers}
@@ -133,7 +154,7 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
 
         <Grid item xs={12} sm={6} md={3}>
           <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
+            <CardContent sx={{ textAlign: "center" }}>
               <Cancel color="error" sx={{ fontSize: 40, mb: 1 }} />
               <Typography variant="h4" color="error.main">
                 {totalQuestions - correctAnswers}
@@ -147,7 +168,7 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
 
         <Grid item xs={12} sm={6} md={3}>
           <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
+            <CardContent sx={{ textAlign: "center" }}>
               <TrendingUp color="info" sx={{ fontSize: 40, mb: 1 }} />
               <Typography variant="h4" color="info.main">
                 {formatTime(averageTimePerQuestion)}
@@ -188,7 +209,7 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
                 </PieChart>
               </ResponsiveContainer>
             </Box>
-            <Box sx={{ textAlign: 'center', mt: 2 }}>
+            <Box sx={{ textAlign: "center", mt: 2 }}>
               <Typography variant="h6">
                 {correctAnswers} out of {totalQuestions} correct
               </Typography>
@@ -205,36 +226,56 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
             <Typography variant="h5" gutterBottom>
               Test Details
             </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                 <Typography variant="body1">Test Type:</Typography>
-                <Chip label={testResult.testType} color="primary" size="small" />
-              </Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body1">Section:</Typography>
-                <Chip label={testResult.section} variant="outlined" size="small" />
-              </Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body1">Difficulty:</Typography>
-                <Chip 
-                  label={testResult.difficulty} 
-                  color={testResult.difficulty === 'easy' ? 'success' : 
-                         testResult.difficulty === 'medium' ? 'warning' : 'error'}
-                  size="small" 
+                <Chip
+                  label={testResult.testType}
+                  color="primary"
+                  size="small"
                 />
               </Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography variant="body1">Section:</Typography>
+                <Chip
+                  label={testResult.section}
+                  variant="outlined"
+                  size="small"
+                />
+              </Box>
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography variant="body1">Difficulty:</Typography>
+                <Chip
+                  label={testResult.difficulty}
+                  color={
+                    testResult.difficulty === "easy"
+                      ? "success"
+                      : testResult.difficulty === "medium"
+                      ? "warning"
+                      : "error"
+                  }
+                  size="small"
+                />
+              </Box>
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                 <Typography variant="body1">Date:</Typography>
                 <Typography variant="body2">
                   {new Date(testResult.createdAt).toLocaleDateString()}
                 </Typography>
               </Box>
               <Divider />
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body1" fontWeight="bold">Performance Rating:</Typography>
-                <Chip 
-                  label={accuracy >= 80 ? 'Excellent' : 
-                         accuracy >= 60 ? 'Good' : 'Needs Improvement'}
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography variant="body1" fontWeight="bold">
+                  Performance Rating:
+                </Typography>
+                <Chip
+                  label={
+                    accuracy >= 80
+                      ? "Excellent"
+                      : accuracy >= 60
+                      ? "Good"
+                      : "Needs Improvement"
+                  }
                   color={getAccuracyColor(accuracy)}
                 />
               </Box>
@@ -248,14 +289,18 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
             <Typography variant="h5" gutterBottom>
               AI Performance Analysis
             </Typography>
-            {isLoadingEvaluation ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', py: 4 }}>
-                <CircularProgress sx={{ mr: 2 }} />
-                <Typography>Analyzing your performance...</Typography>
-              </Box>
+            {/* Use new AIInsights component for JSON insights */}
+            {aiInsights && !isLoadingEvaluation ? (
+              <AIInsights insights={aiInsights} isLoading={false} />
+            ) : isLoadingEvaluation ? (
+              <AIInsights insights={null} isLoading={true} />
             ) : (
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-                {aiEvaluation || 'AI evaluation could not be generated at this time.'}
+              <Typography
+                variant="body1"
+                sx={{ whiteSpace: "pre-line", lineHeight: 1.6 }}
+              >
+                {aiEvaluation ||
+                  "AI evaluation could not be generated at this time."}
               </Typography>
             )}
           </Paper>
@@ -270,11 +315,17 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
             {testResult.questions.map((question, index) => (
               <Accordion key={index}>
                 <AccordionSummary expandIcon={<ExpandMore />}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      width: "100%",
+                    }}
+                  >
                     <Typography sx={{ flexGrow: 1 }}>
                       Question {index + 1}
                     </Typography>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Box sx={{ display: "flex", gap: 1 }}>
                       {question.isCorrect ? (
                         <CheckCircle color="success" />
                       ) : (
@@ -291,15 +342,17 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
                     <Typography variant="body1" sx={{ mb: 2 }}>
                       <strong>Question:</strong> {question.question}
                     </Typography>
-                    
+
                     <Typography variant="body2" sx={{ mb: 1 }}>
-                      <strong>Your Answer:</strong> {question.options[question.userAnswer]}
+                      <strong>Your Answer:</strong>{" "}
+                      {question.options[question.userAnswer]}
                     </Typography>
-                    
+
                     <Typography variant="body2" sx={{ mb: 2 }}>
-                      <strong>Correct Answer:</strong> {question.options[question.correctAnswer]}
+                      <strong>Correct Answer:</strong>{" "}
+                      {question.options[question.correctAnswer]}
                     </Typography>
-                    
+
                     {question.explanation && (
                       <Alert severity="info" sx={{ mt: 2 }}>
                         <Typography variant="body2">
@@ -316,7 +369,7 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
       </Grid>
 
       {/* Action Buttons */}
-      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 4 }}>
+      <Box sx={{ display: "flex", justifyContent: "center", gap: 2, mt: 4 }}>
         <Button
           variant="outlined"
           startIcon={<Home />}
@@ -325,7 +378,7 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
         >
           Return to Dashboard
         </Button>
-        
+
         <Button
           variant="contained"
           startIcon={<Refresh />}
