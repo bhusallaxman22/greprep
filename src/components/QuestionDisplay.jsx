@@ -50,9 +50,6 @@ const QuestionDisplay = ({
   onPrevious,
   onFinish,
   selectedAnswer,
-  isLoading,
-  questionsArray,
-  // Legacy props for backward compatibility
   currentQuestionIndex,
   onAnswerSelect,
   onNextQuestion,
@@ -77,10 +74,48 @@ const QuestionDisplay = ({
   const actualQuestionIndex = questionNumber
     ? questionNumber - 1
     : currentQuestionIndex ?? 0;
-  const handleAnswerSelect = onAnswer || onAnswerSelect || (() => {});
+  // Local state for answers to ensure all are captured before scoring
+  const [localAnswers, setLocalAnswers] = useState(userAnswers);
+
+  // Update localAnswers when userAnswers prop changes (e.g., on test reset)
+  // Use JSON.stringify to create a stable dependency that only changes when content changes
+  const userAnswersString = JSON.stringify(userAnswers || {});
+
+  useEffect(() => {
+    const parsedUserAnswers = JSON.parse(userAnswersString);
+    if (Object.keys(parsedUserAnswers).length === 0) {
+      // Test reset - clear local answers
+      setLocalAnswers({});
+    }
+  }, [userAnswersString]);
+
+  // Always update localAnswers and call parent handler
+  const handleAnswerSelect = (value) => {
+    // Find the index of the selected option for the parent component
+    const optionIndex = question.options?.findIndex((option) => {
+      const optionValue =
+        typeof option === "string"
+          ? option
+          : option.text || option.label || option.value;
+      return optionValue === value;
+    });
+
+    const updatedAnswers = { ...localAnswers, [actualQuestionIndex]: value };
+    setLocalAnswers(updatedAnswers);
+
+    // Call parent handlers with the expected format
+    if (onAnswer) onAnswer(optionIndex); // Parent expects index
+    if (onAnswerSelect) onAnswerSelect(value); // Some handlers might expect value
+  };
   const handleNextQuestion = onNext || onNextQuestion || (() => {});
   const handlePreviousQuestion = onPrevious || onPreviousQuestion || (() => {});
-  const handleFinishTest = onFinish || onFinishTest || (() => {});
+  // When finishing test, convert localAnswers back to indices for parent component
+  const handleFinishTest = () => {
+    // For now, just pass the localAnswers as-is since the parent will handle the conversion
+    // The parent component has access to all questions and can convert values to indices
+    if (onFinish) onFinish(localAnswers);
+    if (onFinishTest) onFinishTest(localAnswers);
+  };
 
   // Calculate progress
   const progressPercentage =
@@ -90,8 +125,29 @@ const QuestionDisplay = ({
   const isQuestionFlagged = flaggedQuestions.includes(actualQuestionIndex);
 
   useEffect(() => {
-    // Reset state when question changes
-  }, [actualQuestionIndex]);
+    // Sync with parent's selectedAnswer only when needed
+    // Avoid infinite loop by checking if update is actually needed
+    if (
+      selectedAnswer !== undefined &&
+      question?.options?.[selectedAnswer] &&
+      !(actualQuestionIndex in localAnswers)
+    ) {
+      const selectedValue =
+        typeof question.options[selectedAnswer] === "string"
+          ? question.options[selectedAnswer]
+          : question.options[selectedAnswer].text ||
+            question.options[selectedAnswer].label ||
+            question.options[selectedAnswer].value;
+
+      setLocalAnswers((prev) => ({
+        ...prev,
+        [actualQuestionIndex]: selectedValue,
+      }));
+    }
+    // Intentionally not including localAnswers in deps to avoid infinite loop
+    // The check `!(actualQuestionIndex in localAnswers)` prevents unnecessary updates
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actualQuestionIndex, selectedAnswer]);
 
   const handleAnswerChange = (event) => {
     handleAnswerSelect(event.target.value);
@@ -130,7 +186,7 @@ const QuestionDisplay = ({
           }}
         >
           {Array.from({ length: totalQuestions }, (_, index) => {
-            const isAnswered = userAnswers[index] !== undefined;
+            const isAnswered = localAnswers[index] !== undefined;
             const isFlagged = flaggedQuestions.includes(index);
             const isCurrent = index === actualQuestionIndex;
 
@@ -609,7 +665,17 @@ const QuestionDisplay = ({
               )}
 
               <RadioGroup
-                value={selectedAnswer || ""}
+                value={
+                  localAnswers[actualQuestionIndex] ||
+                  (selectedAnswer !== undefined &&
+                  question.options?.[selectedAnswer]
+                    ? typeof question.options[selectedAnswer] === "string"
+                      ? question.options[selectedAnswer]
+                      : question.options[selectedAnswer].text ||
+                        question.options[selectedAnswer].label ||
+                        question.options[selectedAnswer].value
+                    : "")
+                }
                 onChange={handleAnswerChange}
               >
                 {question.options?.map((option, index) => {
@@ -622,20 +688,32 @@ const QuestionDisplay = ({
                       ? option
                       : option.value || option.text || option.label;
 
+                  // Get the currently selected value (either from local state or converted from parent index)
+                  const currentSelectedValue =
+                    localAnswers[actualQuestionIndex] ||
+                    (selectedAnswer !== undefined &&
+                    question.options?.[selectedAnswer]
+                      ? typeof question.options[selectedAnswer] === "string"
+                        ? question.options[selectedAnswer]
+                        : question.options[selectedAnswer].text ||
+                          question.options[selectedAnswer].label ||
+                          question.options[selectedAnswer].value
+                      : "");
+
                   return (
                     <Grow key={index} in timeout={1200 + index * 200}>
                       <Paper
-                        elevation={selectedAnswer === optionValue ? 3 : 1}
+                        elevation={currentSelectedValue === optionValue ? 3 : 1}
                         sx={{
                           mb: 2,
                           borderRadius: 2,
                           transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                           border:
-                            selectedAnswer === optionValue
+                            currentSelectedValue === optionValue
                               ? `2px solid ${theme.palette.primary.main}`
                               : `1px solid ${theme.palette.divider}`,
                           background:
-                            selectedAnswer === optionValue
+                            currentSelectedValue === optionValue
                               ? `linear-gradient(135deg, ${theme.palette.primary.light}20, ${theme.palette.secondary.light}20)`
                               : theme.palette.background.paper,
                           "&:hover": {
@@ -666,7 +744,9 @@ const QuestionDisplay = ({
                                 px: 1,
                                 fontSize: isMobile ? "0.95rem" : "1rem",
                                 fontWeight:
-                                  selectedAnswer === optionValue ? 600 : 400,
+                                  currentSelectedValue === optionValue
+                                    ? 600
+                                    : 400,
                                 lineHeight: 1.5,
                               }}
                             >
