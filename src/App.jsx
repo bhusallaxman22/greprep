@@ -9,7 +9,6 @@ import {
   Button,
   Alert,
   Snackbar,
-  IconButton,
   Menu,
   MenuItem,
 } from "@mui/material";
@@ -26,7 +25,7 @@ import Dashboard from "./components/Dashboard";
 import TestSelection from "./components/TestSelection";
 import QuestionDisplay from "./components/QuestionDisplay";
 import TestResults from "./components/TestResults";
-import AuthScreen from "./components/AuthScreen";
+import LandingPage from "./components/LandingPage";
 import UserProfile from "./components/UserProfile";
 import ModuleLearning from "./components/ModuleLearning";
 import EnhancedLearning from "./components/EnhancedLearning";
@@ -37,12 +36,6 @@ import useTestFlow from "./hooks/useTestFlow";
 
 // SEO Components
 import SimpleSEOHead from "./components/atoms/SimpleSEOHead";
-import {
-  SEOLandingHero,
-  SEOFeatureSection,
-  SEOTestTypesSection,
-} from "./components/organisms/SEOLandingContent";
-import seoConfig from "./constants/seoConfig";
 import { SEO_PAGES, STRUCTURED_DATA } from "./constants/seoConfig";
 
 // Create a clean, minimal theme with animations
@@ -199,7 +192,7 @@ const theme = createTheme({
 });
 
 function AppContent() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [appState, setAppState] = useState(APP_STATES.DASHBOARD);
   const { anchorEl, isOpen, openMenu, closeMenu } = useMenu();
   const [showProfile, setShowProfile] = useState(false);
@@ -225,16 +218,12 @@ function AppContent() {
     clearError,
   } = useTestFlow(user);
 
-  const navigateToAbout = () => {
-    setAppState(APP_STATES.ABOUT);
-    closeMenu();
+  const handleMenuClick = (event) => {
+    openMenu(event);
   };
-  const navigateToDashboard = () => {
-    setAppState(APP_STATES.DASHBOARD);
-    closeMenu();
-  };
-  const navigateToLearning = () => {
-    setAppState(APP_STATES.LEARNING);
+
+  const handleSignOut = () => {
+    signOut();
     closeMenu();
   };
 
@@ -278,85 +267,97 @@ function AppContent() {
           backgroundColor: "background.default",
         }}
       >
-        {/* App Bar */}
-        <AppBar
-          position="static"
-          elevation={1}
-          sx={{
-            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-          }}
+        {/* AppBar - Only show when user is logged in */}
+        {user && (
+          <AppBar position="static" sx={{ bgcolor: "primary.main" }}>
+            <Toolbar>
+              <School sx={{ mr: 2 }} />
+              <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+                GRE GMAT Test Prep
+              </Typography>
+
+              {user && (
+                <>
+                  <Button
+                    color="inherit"
+                    startIcon={<Home />}
+                    onClick={returnToDashboard}
+                    sx={{ mr: 1 }}
+                  >
+                    Dashboard
+                  </Button>
+                  <Button
+                    color="inherit"
+                    startIcon={<MenuBook />}
+                    onClick={startLearning}
+                    sx={{ mr: 1 }}
+                  >
+                    Learning
+                  </Button>
+                  <Button
+                    color="inherit"
+                    startIcon={<Info />}
+                    onClick={() => setAppState(APP_STATES.ABOUT)}
+                    sx={{ mr: 2 }}
+                  >
+                    About
+                  </Button>
+                  <Button
+                    color="inherit"
+                    startIcon={<AccountCircle />}
+                    onClick={handleMenuClick}
+                    endIcon={
+                      <Typography variant="body2" sx={{ ml: 1 }}>
+                        {user.isAnonymous
+                          ? "Guest User"
+                          : user.displayName || user.email}
+                      </Typography>
+                    }
+                  >
+                    {user.isAnonymous
+                      ? "Guest User"
+                      : user.displayName || user.email}
+                  </Button>
+                </>
+              )}
+            </Toolbar>
+          </AppBar>
+        )}
+
+        {/* User Menu */}
+        <Menu
+          anchorEl={anchorEl}
+          open={isOpen}
+          onClose={closeMenu}
+          onClick={closeMenu}
         >
-          <Toolbar>
-            <School sx={{ mr: 2 }} />
-            <Typography
-              variant="h6"
-              component="div"
-              sx={{ flexGrow: 1, fontWeight: 600 }}
-            >
-              GRE/GMAT Test Prep
-            </Typography>
-            {user && (
-              <>
-                <IconButton color="inherit" onClick={openMenu} sx={{ mr: 1 }}>
-                  <MenuBook />
-                </IconButton>
-                <Menu
-                  anchorEl={anchorEl}
-                  open={isOpen}
-                  onClose={closeMenu}
-                  slotProps={{
-                    paper: { sx: { mt: 1, borderRadius: 2, boxShadow: 3 } },
-                  }}
-                >
-                  <MenuItem onClick={navigateToDashboard}>
-                    <Home sx={{ mr: 1 }} /> Dashboard
-                  </MenuItem>
-                  <MenuItem onClick={navigateToLearning}>
-                    <MenuBook sx={{ mr: 1 }} /> Learning
-                  </MenuItem>
-                  <MenuItem onClick={navigateToAbout}>
-                    <Info sx={{ mr: 1 }} /> About
-                  </MenuItem>
-                </Menu>
-                <Button
-                  color="inherit"
-                  startIcon={<AccountCircle />}
-                  onClick={() => setShowProfile(true)}
-                  sx={{
-                    borderRadius: 2,
-                    "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
-                  }}
-                >
-                  {user.isAnonymous
-                    ? "Guest User"
-                    : user.displayName || user.email}
-                </Button>
-              </>
-            )}
-          </Toolbar>
-        </AppBar>
+          <MenuItem onClick={() => setShowProfile(true)}>
+            <AccountCircle sx={{ mr: 1 }} />
+            Profile
+          </MenuItem>
+          <MenuItem onClick={handleSignOut}>
+            <Typography>Sign Out</Typography>
+          </MenuItem>
+        </Menu>
 
         {/* Main Content */}
         <Box>
           {!user ? (
-            <AuthScreen />
+            <LandingPage />
           ) : (
             <>
               {appState === APP_STATES.DASHBOARD && (
                 <>
                   <SimpleSEOHead
-                    title={seoConfig.SEO_PAGES.HOME.title}
-                    description={seoConfig.SEO_PAGES.HOME.description}
-                    keywords={seoConfig.SEO_PAGES.HOME.keywords}
-                    canonical={seoConfig.SEO_PAGES.HOME.canonical}
+                    title={SEO_PAGES.DASHBOARD.title}
+                    description={SEO_PAGES.DASHBOARD.description}
+                    keywords={SEO_PAGES.DASHBOARD.keywords}
+                    canonical={SEO_PAGES.DASHBOARD.canonical}
                     jsonLd={[
-                      seoConfig.STRUCTURED_DATA.WEBSITE,
-                      seoConfig.STRUCTURED_DATA.SOFTWARE_APPLICATION,
+                      STRUCTURED_DATA.WEBSITE,
+                      STRUCTURED_DATA.SOFTWARE_APPLICATION,
                     ]}
                   />
-                  <SEOLandingHero />
-                  <SEOFeatureSection />
-                  <SEOTestTypesSection />
                   <Dashboard
                     onStartTest={startTestSelection}
                     onStartLearning={startLearning}
@@ -366,11 +367,11 @@ function AppContent() {
               {appState === APP_STATES.TEST_SELECTION && (
                 <>
                   <SimpleSEOHead
-                    title={seoConfig.SEO_PAGES.TEST_SELECTION.title}
-                    description={seoConfig.SEO_PAGES.TEST_SELECTION.description}
-                    keywords={seoConfig.SEO_PAGES.TEST_SELECTION.keywords}
-                    canonical={seoConfig.SEO_PAGES.TEST_SELECTION.canonical}
-                    jsonLd={seoConfig.STRUCTURED_DATA.COURSE}
+                    title={SEO_PAGES.TEST_SELECTION.title}
+                    description={SEO_PAGES.TEST_SELECTION.description}
+                    keywords={SEO_PAGES.TEST_SELECTION.keywords}
+                    canonical={SEO_PAGES.TEST_SELECTION.canonical}
+                    jsonLd={STRUCTURED_DATA.COURSE}
                   />
                   <TestSelection
                     onStartTest={startTestAndGo}
@@ -381,13 +382,11 @@ function AppContent() {
               {appState === APP_STATES.TEST_IN_PROGRESS && (
                 <>
                   <SimpleSEOHead
-                    title={seoConfig.SEO_PAGES.QUESTION_PRACTICE.title}
-                    description={
-                      seoConfig.SEO_PAGES.QUESTION_PRACTICE.description
-                    }
-                    keywords={seoConfig.SEO_PAGES.QUESTION_PRACTICE.keywords}
-                    canonical={seoConfig.SEO_PAGES.QUESTION_PRACTICE.canonical}
-                    jsonLd={seoConfig.STRUCTURED_DATA.COURSE}
+                    title={SEO_PAGES.QUESTION_PRACTICE.title}
+                    description={SEO_PAGES.QUESTION_PRACTICE.description}
+                    keywords={SEO_PAGES.QUESTION_PRACTICE.keywords}
+                    canonical={SEO_PAGES.QUESTION_PRACTICE.canonical}
+                    jsonLd={STRUCTURED_DATA.COURSE}
                   />
                   <QuestionDisplay
                     question={currentQuestion}
@@ -406,11 +405,11 @@ function AppContent() {
               {appState === APP_STATES.TEST_RESULTS && (
                 <>
                   <SimpleSEOHead
-                    title={seoConfig.SEO_PAGES.TEST_RESULTS.title}
-                    description={seoConfig.SEO_PAGES.TEST_RESULTS.description}
-                    keywords={seoConfig.SEO_PAGES.TEST_RESULTS.keywords}
-                    canonical={seoConfig.SEO_PAGES.TEST_RESULTS.canonical}
-                    jsonLd={seoConfig.STRUCTURED_DATA.SOFTWARE_APPLICATION}
+                    title={SEO_PAGES.TEST_RESULTS.title}
+                    description={SEO_PAGES.TEST_RESULTS.description}
+                    keywords={SEO_PAGES.TEST_RESULTS.keywords}
+                    canonical={SEO_PAGES.TEST_RESULTS.canonical}
+                    jsonLd={STRUCTURED_DATA.SOFTWARE_APPLICATION}
                   />
                   <TestResults
                     testResult={testResult}
