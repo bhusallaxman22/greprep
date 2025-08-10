@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://yourdomain.com/sitemap.xml
+
+# Priority crawling for SEO-optimized pages
+Allow: /dashboard
+Allow: /test-selection
+Allow: /practice
+Allow: /results
+Allow: /about
+
+# Encourage indexing of key content
+Crawl-delay: 1

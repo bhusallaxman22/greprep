@@ -1,13 +1,28 @@
+import { OPENROUTER } from '../config';
+
 // OpenRouter AI service for question generation and evaluation
-const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
-const OPENROUTER_BASE_URL = import.meta.env.VITE_OPENROUTER_BASE_URL;
+// const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
+// const OPENROUTER_BASE_URL = import.meta.env.VITE_OPENROUTER_BASE_URL;
 
 class OpenRouterService {
   constructor() {
-    this.apiKey = OPENROUTER_API_KEY;
-    this.baseUrl = OPENROUTER_BASE_URL;
-    this.maxRetries = 3;
-    this.baseDelay = 1000; // 1 second
+    this.apiKey = OPENROUTER.apiKey;
+    this.baseUrl = OPENROUTER.baseUrl;
+    this.maxRetries = OPENROUTER.maxRetries;
+    this.baseDelay = OPENROUTER.baseDelayMs; // 1 second
+  }
+
+  buildHeaders() {
+    const headers = {
+      Authorization: `Bearer ${this.apiKey}`,
+      'Content-Type': 'application/json',
+      'X-Title': OPENROUTER.appTitle,
+    };
+    // Only set Referer in browser context
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      headers['HTTP-Referer'] = window.location.origin;
+    }
+    return headers;
   }
 
   // Utility function for delay
@@ -23,13 +38,8 @@ class OpenRouterService {
   async makeRequest(endpoint, data, retryCount = 0) {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": window.location.origin,
-          "X-Title": "GRE/GMAT Test Prep App",
-        },
+        method: 'POST',
+        headers: this.buildHeaders(),
         body: JSON.stringify(data),
       });
 
@@ -80,7 +90,8 @@ class OpenRouterService {
 
       // Strategy 2: Extract JSON block with better regex
       () => {
-        const jsonMatch = content.match(/\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/);
+        const re = /\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/;
+        const jsonMatch = re.exec(content);
         if (!jsonMatch) throw new Error('No JSON found');
         return JSON.parse(jsonMatch[0]);
       },
@@ -88,10 +99,14 @@ class OpenRouterService {
       // Strategy 3: Fix common AI JSON issues
       () => {
         let fixed = content
-          .replace(/^.*?({.*}).*$/s, '$1') // Extract JSON object
-          .replace(/[^\x20-\x7E\s]/g, '') // Keep only printable ASCII and whitespace
+          .replace(/^.*?({.*}).*$/s, '$1'); // Extract JSON object
+        // Remove control characters manually
+        fixed = Array.from(fixed).map(c => {
+          const code = c.charCodeAt(0);
+          return (code < 32 || code === 127) ? ' ' : c;
+        }).join('')
           .replace(/\\n/g, '\\\\n') // Fix newlines
-          .replace(/\\"/g, '\\"') // Fix quotes
+          .replace(/"/g, '"') // normalize quotes
           .replace(/(\w+):/g, '"$1":') // Add quotes to keys
           .replace(/,(\s*[}\]])/g, '$1'); // Remove trailing commas
         return JSON.parse(fixed);
@@ -103,9 +118,7 @@ class OpenRouterService {
         let inString = false;
         let escapeNext = false;
 
-        for (let i = 0; i < content.length; i++) {
-          const char = content[i];
-
+        for (const char of content) {
           if (escapeNext) {
             cleaned += char;
             escapeNext = false;
@@ -125,12 +138,11 @@ class OpenRouterService {
           }
 
           if (!inString && (char === '\n' || char === '\r' || char === '\t')) {
-            cleaned += ' '; // Replace with space
+            cleaned += ' ';
             continue;
           }
 
           if (inString && char.charCodeAt(0) < 32) {
-            // Replace control characters in strings
             cleaned += ' ';
             continue;
           }
@@ -139,7 +151,7 @@ class OpenRouterService {
         }
 
         // Extract JSON object
-        const match = cleaned.match(/\{.*\}/s);
+        const match = /\{[\s\S]*\}/.exec(cleaned);
         if (!match) throw new Error('No JSON object found');
 
         return JSON.parse(match[0]);
@@ -585,281 +597,64 @@ Keep it concise (under 300 words), specific to their data, and immediately actio
     }
   }
 
-  // Enhanced method that supports both text and JSON formats for AI insights
+  parseEvaluationJson(content, stats, testResults) {
+    try {
+      const jsonMatch = /\{[\s\S]*\}/.exec(content);
+      if (jsonMatch) return JSON.parse(jsonMatch[0]);
+      throw new Error('No JSON found in response');
+    } catch (parseError) {
+      console.error('Failed to parse JSON response:', parseError);
+      const sorted = Object.entries(stats.sectionPerformance).sort((a, b) => b[1].accuracy - a[1].accuracy);
+      const strongest = sorted[0] ? sorted[0][0] : 'N/A';
+      const weakest = sorted[sorted.length - 1] ? sorted[sorted.length - 1][0] : 'N/A';
+      return {
+        keyInsights: { title: 'Key Insights', content: 'Analysis completed. Please check your performance data for detailed insights.', icon: 'lightbulb', severity: 'info' },
+        priorityActions: { title: 'Priority Actions', content: 'Focus on practicing your weakest sections and review missed questions.', icon: 'flag', severity: 'warning' },
+        studyPlan: { title: 'Study Plan', items: ['Review incorrect answers and explanations', 'Practice timed sections to improve speed', 'Focus on your weakest question types'], icon: 'book', severity: 'success' },
+        testStrategy: { title: 'Test-Taking Strategy', content: 'Manage your time effectively and read questions carefully before answering.', icon: 'psychology', severity: 'info' },
+        motivation: { title: 'Motivation & Goals', content: "You're making progress! Keep practicing consistently to see continued improvement.", icon: 'trending_up', severity: 'success' },
+        stats: { overallScore: stats.accuracy, strongestSection: strongest, weakestSection: weakest, totalQuestions: stats.totalQuestions, testsCompleted: testResults.length },
+      };
+    }
+  }
+
   async evaluatePerformanceWithFormat(testResults, returnFormat = 'text', retryCount = 0) {
     if (!testResults || testResults.length === 0) {
       return returnFormat === 'json'
-        ? { error: "No test data available for performance analysis." }
-        : "No test data available for performance analysis.";
+        ? { error: 'No test data available for performance analysis.' }
+        : 'No test data available for performance analysis.';
     }
 
-    // Extract meaningful patterns from the test data
-    const recentTests = testResults.slice(0, 5); // Last 5 tests
-
-    // Calculate overall statistics from all test questions
-    let totalQuestions = 0;
-    let correctAnswers = 0;
-    const allQuestions = [];
-
-    testResults.forEach((test) => {
-      if (test.questions && Array.isArray(test.questions)) {
-        test.questions.forEach((question) => {
-          allQuestions.push(question);
-          totalQuestions++;
-          if (question.isCorrect) {
-            correctAnswers++;
-          }
-        });
-      }
-    });
-
-    const accuracy =
-      totalQuestions > 0
-        ? Math.round((correctAnswers / totalQuestions) * 100)
-        : 0;
-
-    // Analyze patterns
-    const sectionPerformance = {};
-    const difficultyPerformance = {};
-
-    allQuestions.forEach((question) => {
-      // Section analysis
-      const section = question.section || "Unknown";
-      if (!sectionPerformance[section]) {
-        sectionPerformance[section] = {
-          correct: 0,
-          total: 0,
-          avgTime: 0,
-        };
-      }
-      sectionPerformance[section].total++;
-      if (question.isCorrect) sectionPerformance[section].correct++;
-      sectionPerformance[section].avgTime += question.timeSpent || 0;
-
-      // Difficulty analysis
-      const difficulty = question.difficulty || "Unknown";
-      if (!difficultyPerformance[difficulty]) {
-        difficultyPerformance[difficulty] = { correct: 0, total: 0 };
-      }
-      difficultyPerformance[difficulty].total++;
-      if (question.isCorrect) difficultyPerformance[difficulty].correct++;
-    });
-
-    // Calculate averages and trends
-    Object.keys(sectionPerformance).forEach((section) => {
-      const data = sectionPerformance[section];
-      data.accuracy = Math.round((data.correct / data.total) * 100);
-      data.avgTime = Math.round(data.avgTime / data.total);
-    });
-
-    const basePrompt = `As an expert test prep tutor, analyze this student's performance data and provide specific, actionable insights:
-
-PERFORMANCE DATA:
-- Total Questions: ${totalQuestions}
-- Overall Accuracy: ${accuracy}%
-- Test Type: ${testResults[0]?.testType || "Unknown"}
-- Number of Tests Taken: ${testResults.length}
-
-SECTION BREAKDOWN:
-${Object.entries(sectionPerformance)
-        .map(
-          ([section, data]) =>
-            `${section}: ${data.accuracy}% accuracy (${data.correct}/${data.total}), avg ${data.avgTime}s per question`
-        )
-        .join("\n")}
-
-DIFFICULTY BREAKDOWN:
-${Object.entries(difficultyPerformance)
-        .map(
-          ([difficulty, data]) =>
-            `${difficulty}: ${Math.round(
-              (data.correct / data.total) * 100
-            )}% accuracy (${data.correct}/${data.total})`
-        )
-        .join("\n")}
-
-RECENT TEST PERFORMANCE:
-${recentTests
-        .map((test, i) => {
-          const testCorrect = test.questions
-            ? test.questions.filter((q) => q.isCorrect).length
-            : 0;
-          const testTotal = test.questions ? test.questions.length : 0;
-          const testAccuracy =
-            testTotal > 0 ? Math.round((testCorrect / testTotal) * 100) : 0;
-          return `Test ${i + 1
-            }: ${testAccuracy}% accuracy (${testCorrect}/${testTotal}) - ${test.testType
-            } ${test.section}`;
-        })
-        .join("\n")}`;
-
-    let prompt;
-    if (returnFormat === 'json') {
-      // Find strongest and weakest sections
-      const sortedSections = Object.entries(sectionPerformance).sort((a, b) => b[1].accuracy - a[1].accuracy);
-      const strongestSection = sortedSections[0] ? sortedSections[0][0] : "N/A";
-      const weakestSection = sortedSections[sortedSections.length - 1] ? sortedSections[sortedSections.length - 1][0] : "N/A";
-
-      prompt = `${basePrompt}
-
-Return your analysis as a JSON object with the following structure:
-{
-  "keyInsights": {
-    "title": "Key Insights",
-    "content": "What specific patterns do you see? What's the student doing well vs struggling with?",
-    "icon": "lightbulb",
-    "severity": "info"
-  },
-  "priorityActions": {
-    "title": "Priority Actions", 
-    "content": "What should they focus on FIRST to get the biggest improvement?",
-    "icon": "flag",
-    "severity": "warning"
-  },
-  "studyPlan": {
-    "title": "Study Plan",
-    "items": [
-      "Concrete actionable step 1",
-      "Concrete actionable step 2", 
-      "Concrete actionable step 3"
-    ],
-    "icon": "book",
-    "severity": "success"
-  },
-  "testStrategy": {
-    "title": "Test-Taking Strategy",
-    "content": "Specific advice for timing, question approach, or test day tactics",
-    "icon": "psychology",
-    "severity": "info"
-  },
-  "motivation": {
-    "title": "Motivation & Goals",
-    "content": "One encouraging insight and realistic expectation for improvement",
-    "icon": "trending_up",
-    "severity": "success"
-  },
-  "stats": {
-    "overallScore": ${accuracy},
-    "strongestSection": "${strongestSection}",
-    "weakestSection": "${weakestSection}",
-    "totalQuestions": ${totalQuestions},
-    "testsCompleted": ${testResults.length}
-  }
-}
-
-Keep each content section concise (under 100 words), specific to their data, and immediately actionable. Avoid generic advice.`;
-    } else {
-      prompt = `${basePrompt}
-
-Please provide a concise, personalized analysis focusing on:
-
-1. **Key Insights**: What specific patterns do you see? What's the student doing well vs struggling with?
-
-2. **Priority Actions**: What should they focus on FIRST to get the biggest improvement?
-
-3. **Specific Study Plan**: Give 3-4 concrete, actionable steps they can take this week.
-
-4. **Test-Taking Strategy**: Any specific advice for timing, question approach, or test day tactics?
-
-5. **Motivation**: One encouraging insight and realistic expectation for improvement.
-
-Keep it concise (under 300 words), specific to their data, and immediately actionable. Avoid generic advice.`;
-    }
+    const stats = this.computePerformanceStats(testResults);
+    const prompt = this.buildEvaluationPrompt(stats, testResults, returnFormat);
 
     const data = {
-      model: "google/gemma-3-4b-it",
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+      model: 'google/gemma-3-4b-it',
+      messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
       max_tokens: returnFormat === 'json' ? 2000 : 1500,
     };
 
     try {
-      const response = await this.makeRequest("/chat/completions", data);
+      const response = await this.makeRequest('/chat/completions', data);
       const content = response.choices[0].message.content;
 
       if (returnFormat === 'json') {
-        try {
-          // Try to parse as JSON
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
-          } else {
-            throw new Error('No JSON found in response');
-          }
-        } catch (parseError) {
-          console.error('Failed to parse JSON response:', parseError);
-          // Return a fallback structured object
-          const sortedSections = Object.entries(sectionPerformance).sort((a, b) => b[1].accuracy - a[1].accuracy);
-          const strongestSection = sortedSections[0] ? sortedSections[0][0] : "N/A";
-          const weakestSection = sortedSections[sortedSections.length - 1] ? sortedSections[sortedSections.length - 1][0] : "N/A";
-
-          return {
-            keyInsights: {
-              title: "Key Insights",
-              content: "Analysis completed. Please check your performance data for detailed insights.",
-              icon: "lightbulb",
-              severity: "info"
-            },
-            priorityActions: {
-              title: "Priority Actions",
-              content: "Focus on practicing your weakest sections and review missed questions.",
-              icon: "flag",
-              severity: "warning"
-            },
-            studyPlan: {
-              title: "Study Plan",
-              items: [
-                "Review incorrect answers and explanations",
-                "Practice timed sections to improve speed",
-                "Focus on your weakest question types"
-              ],
-              icon: "book",
-              severity: "success"
-            },
-            testStrategy: {
-              title: "Test-Taking Strategy",
-              content: "Manage your time effectively and read questions carefully before answering.",
-              icon: "psychology",
-              severity: "info"
-            },
-            motivation: {
-              title: "Motivation & Goals",
-              content: "You're making progress! Keep practicing consistently to see continued improvement.",
-              icon: "trending_up",
-              severity: "success"
-            },
-            stats: {
-              overallScore: accuracy,
-              strongestSection: strongestSection,
-              weakestSection: weakestSection,
-              totalQuestions: totalQuestions,
-              testsCompleted: testResults.length
-            }
-          };
-        }
+        return this.parseEvaluationJson(content, stats, testResults);
       }
 
       return content;
     } catch (error) {
-      console.error(
-        `Failed to evaluate performance (attempt ${retryCount + 1}):`,
-        error
-      );
-
+      console.error(`Failed to evaluate performance (attempt ${retryCount + 1}):`, error);
       if (retryCount < this.maxRetries) {
         await this.delay(this.calculateDelay(retryCount));
         return this.evaluatePerformanceWithFormat(testResults, returnFormat, retryCount + 1);
       }
 
       if (returnFormat === 'json') {
-        return { error: "Performance evaluation is temporarily unavailable. Please try again later." };
+        return { error: 'Performance evaluation is temporarily unavailable. Please try again later.' };
       }
-      return "Performance evaluation is temporarily unavailable. Please try again later.";
+      return 'Performance evaluation is temporarily unavailable. Please try again later.';
     }
   }
 
@@ -870,812 +665,175 @@ Keep it concise (under 300 words), specific to their data, and immediately actio
 
 Create a focused 2-week study plan with:
 
-📚 **Week 1 Focus:**
+📚 Week 1 Focus:
 - Day-by-day breakdown of what to study
 - Specific practice problems or question types to target
 - Time allocation (e.g., "30 min daily on X, 15 min on Y")
 
-📚 **Week 2 Focus:**  
+📚 Week 2 Focus:
 - How to build on Week 1
 - Practice test strategy
 - Review and reinforcement activities
 
-🎯 **Daily Study Routine:**
+🎯 Daily Study Routine:
 - Morning warm-up (10-15 min)
-- Focused practice session (30-45 min)  
+- Focused practice session (30-45 min)
 - Evening review (10-15 min)
 
-📖 **Specific Resources:**
+📖 Specific Resources:
 - Recommend specific free online resources, apps, or study materials
 - Practice problem sources
 - YouTube channels or websites for these specific weak areas
 
-⚡ **Quick Wins:**
-- 3 immediate tactics they can use to improve these areas
-- Common mistakes to avoid
-- Test-day strategies
+⚡ Quick Wins:
+- 3 immediate changes the student can make to see quick improvement this week
 
-Keep recommendations specific to ${testType} format and these exact weak areas. Avoid generic advice.`;
+Keep it concise, practical, and tailored to the weak areas listed.`;
 
     const data = {
-      model: "google/gemma-3-4b-it",
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.5,
-      max_tokens: 800,
+      model: 'google/gemma-3-4b-it',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.4,
+      max_tokens: 1200,
     };
 
     try {
-      const response = await this.makeRequest("/chat/completions", data);
-      return response.choices[0].message.content;
+      const response = await this.makeRequest('/chat/completions', data);
+      return response.choices?.[0]?.message?.content || '';
     } catch (error) {
-      console.error(
-        `Failed to get study recommendations (attempt ${retryCount + 1}):`,
-        error
-      );
-
+      console.error(`Failed to get study recommendations (attempt ${retryCount + 1}):`, error);
       if (retryCount < this.maxRetries) {
         await this.delay(this.calculateDelay(retryCount));
-        return this.getStudyRecommendations(
-          weakAreas,
-          testType,
-          retryCount + 1
-        );
+        return this.getStudyRecommendations(weakAreas, testType, retryCount + 1);
       }
+      return `Study Recommendations for ${weakAreas.join(', ')}:
 
-      return "Study recommendations are temporarily unavailable. Please try again later.";
+Week 1:
+- Identify foundational concepts and review with short daily sessions (30-40 min).
+- Target 10-15 practice questions daily focused on these topics.
+- Keep a mistake journal and write one-line takeaways per miss.
+
+Week 2:
+- Mix in timed sets (2-3 sets of 8–10 questions) to build speed and accuracy.
+- Do a short review of Week 1 errors and reattempt those problems.
+- End the week with a mini full-section practice and analyze results.
+
+Quick Wins:
+- Use elimination aggressively; narrow to 2 choices before deciding.
+- Set a per-question time budget and move on when exceeded.
+- Review explanations for both correct and incorrect answers.`;
     }
   }
 
-  // Generate quick performance insights for dashboard
-  generateQuickInsights(stats) {
+  generateQuickInsights(userStats) {
+    if (!userStats || userStats.totalTests === 0) {
+      return [
+        'Welcome! Start your first test to unlock personalized insights.',
+      ];
+    }
     const insights = [];
-
-    if (stats.totalTests === 0) {
-      return ["Take your first practice test to get personalized insights!"];
-    }
-
-    // Accuracy insights
-    if (stats.overallAccuracy >= 85) {
-      insights.push(
-        "🎯 Excellent accuracy! Focus on speed and advanced concepts."
-      );
-    } else if (stats.overallAccuracy >= 70) {
-      insights.push(
-        "📈 Good progress! Work on consistency across all sections."
-      );
-    } else if (stats.overallAccuracy >= 50) {
-      insights.push(
-        "🔄 Solid foundation. Focus on your weakest section for quick gains."
-      );
+    if (userStats.overallAccuracy >= 80) {
+      insights.push('Strong performance! Maintain consistency and tackle harder sets.');
+    } else if (userStats.overallAccuracy >= 60) {
+      insights.push('Good base. Focus on weak sections to push past 70–80%.');
     } else {
-      insights.push(
-        "🎯 Review fundamentals first, then build speed gradually."
-      );
+      insights.push('Start with fundamentals. Short daily practice will yield quick gains.');
     }
-
-    // Section-specific insights
-    const sections = Object.keys(stats.sectionBreakdown);
-    if (sections.length > 1) {
-      const sectionAccuracies = sections.map((section) => ({
-        section,
-        accuracy: stats.sectionBreakdown[section].accuracy,
-      }));
-
-      const bestSection = sectionAccuracies.reduce((a, b) =>
-        a.accuracy > b.accuracy ? a : b, sectionAccuracies[0]
-      );
-      const worstSection = sectionAccuracies.reduce((a, b) =>
-        a.accuracy < b.accuracy ? a : b, sectionAccuracies[0]
-      );
-
-      if (bestSection.accuracy - worstSection.accuracy > 20) {
-        insights.push(
-          `💪 Strong in ${bestSection.section}! Apply those skills to improve ${worstSection.section}.`
-        );
-      }
+    const sections = Object.entries(userStats.sectionBreakdown || {}).sort((a, b) => a[1].accuracy - b[1].accuracy);
+    if (sections.length > 0) {
+      insights.push(`Focus on ${sections[0][0]} this week to lift your overall score.`);
     }
-
-    // Trend insights
-    if (stats.improvementTrend > 10) {
-      insights.push("🚀 Great momentum! Keep up your current study routine.");
-    } else if (stats.improvementTrend < -10) {
-      insights.push(
-        "🔄 Time to adjust your study strategy. Focus on fundamentals."
-      );
-    }
-
-    // Frequency insights
-    if (stats.totalTests >= 10) {
-      insights.push(
-        "📊 Good practice frequency! Consider taking full-length practice tests."
-      );
-    } else if (stats.totalTests >= 5) {
-      insights.push(
-        "📈 Building consistency! Take more practice questions daily."
-      );
-    }
-
-    return insights.slice(0, 3); // Return top 3 insights
+    return insights;
   }
 
-  // Generate batch of questions with lazy loading
-  async generateQuestionBatch(moduleId, userLevel, batchSize = 5, startIndex = 0, retryCount = 0) {
-    const prompt = `You are an expert test preparation instructor. Generate exactly ${batchSize} high-quality practice questions for module "${moduleId}" at level ${userLevel}.
+  computePerformanceStats(testResults) {
+    const recentTests = testResults.slice(0, 5);
 
-CRITICAL: Return ONLY a valid JSON object. No markdown, no explanation, no extra text.
+    let totalQuestions = 0;
+    let correctAnswers = 0;
+    const allQuestions = [];
 
-Required JSON structure:
-{
-  "questions": [
-    {
-      "id": ${startIndex + 1},
-      "question": "Clear, well-written question text",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": 0,
-      "explanation": "Detailed explanation of why the answer is correct",
-      "concept": "Key concept being tested",
-      "difficulty": "easy|medium|hard"
-    }
-  ]
-}
-
-Generate exactly ${batchSize} questions. Make them engaging and educational. Focus on practical test preparation.`;
-
-    const data = {
-      model: retryCount === 0 ? "anthropic/claude-3.5-sonnet-20241022" : "google/gemini-2.5-flash-lite",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
-      max_tokens: 2000,
-    };
-
-    try {
-      const response = await this.makeRequest("/chat/completions", data);
-      const content = response.choices[0].message.content;
-
-      const batch = this.cleanAndParseJSON(content);
-
-      if (batch && batch.questions && Array.isArray(batch.questions)) {
-        // Ensure each question has proper ID
-        batch.questions.forEach((q, index) => {
-          q.id = startIndex + index + 1;
+    testResults.forEach((test) => {
+      if (Array.isArray(test.questions)) {
+        test.questions.forEach((q) => {
+          allQuestions.push(q);
+          totalQuestions++;
+          if (q.isCorrect) correctAnswers++;
         });
-        return batch.questions;
-      } else {
-        throw new Error("Invalid batch structure");
       }
-    } catch (error) {
-      console.error(`Failed to generate question batch (attempt ${retryCount + 1}):`, error);
+    });
 
-      if (retryCount < this.maxRetries) {
-        await this.delay(this.calculateDelay(retryCount));
-        return this.generateQuestionBatch(moduleId, userLevel, batchSize, startIndex, retryCount + 1);
-      }
+    const accuracy = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
 
-      // Return fallback questions for this batch
-      return this.generateFallbackBatch(moduleId, batchSize, startIndex);
-    }
+    const sectionPerformance = {};
+    const difficultyPerformance = {};
+
+    allQuestions.forEach((q) => {
+      const section = q.section || 'Unknown';
+      if (!sectionPerformance[section]) sectionPerformance[section] = { correct: 0, total: 0, avgTime: 0 };
+      sectionPerformance[section].total++;
+      if (q.isCorrect) sectionPerformance[section].correct++;
+      sectionPerformance[section].avgTime += q.timeSpent || 0;
+
+      const difficulty = q.difficulty || 'Unknown';
+      if (!difficultyPerformance[difficulty]) difficultyPerformance[difficulty] = { correct: 0, total: 0 };
+      difficultyPerformance[difficulty].total++;
+      if (q.isCorrect) difficultyPerformance[difficulty].correct++;
+    });
+
+    Object.keys(sectionPerformance).forEach((section) => {
+      const data = sectionPerformance[section];
+      data.accuracy = Math.round((data.correct / data.total) * 100);
+      data.avgTime = Math.round(data.avgTime / data.total);
+    });
+
+    return { recentTests, totalQuestions, correctAnswers, accuracy, sectionPerformance, difficultyPerformance };
   }
 
-  // Generate fallback questions for a batch
-  generateFallbackBatch(moduleId, batchSize, startIndex) {
-    const fallbackQuestions = [];
+  buildEvaluationPrompt(stats, testResults, returnFormat = 'text') {
+    const { recentTests, totalQuestions, accuracy, sectionPerformance, difficultyPerformance } = stats;
 
-    for (let i = 0; i < batchSize; i++) {
-      fallbackQuestions.push({
-        id: startIndex + i + 1,
-        question: `Practice question ${startIndex + i + 1} for ${moduleId.replace(/-/g, ' ')}. What is the best approach to solving this type of problem?`,
-        options: [
-          "Read carefully and analyze step by step",
-          "Guess randomly",
-          "Skip difficult parts",
-          "Rush through quickly"
-        ],
-        correctAnswer: 0,
-        explanation: "Taking time to read carefully and analyze step by step is the most effective approach for test preparation.",
-        concept: "Problem-solving strategy",
-        difficulty: "medium"
-      });
+    const base = `As an expert test prep tutor, analyze this student's performance data and provide specific, actionable insights:\n\nPERFORMANCE DATA:\n- Total Questions: ${totalQuestions}\n- Overall Accuracy: ${accuracy}%\n- Test Type: ${testResults[0]?.testType || 'Unknown'}\n- Number of Tests Taken: ${testResults.length}\n\nSECTION BREAKDOWN:\n${Object.entries(sectionPerformance)
+      .map(([section, d]) => `${section}: ${d.accuracy}% accuracy (${d.correct}/${d.total}), avg ${d.avgTime}s per question`)
+      .join('\n')}\n\nDIFFICULTY BREAKDOWN:\n${Object.entries(difficultyPerformance)
+        .map(([diff, d]) => `${diff}: ${Math.round((d.correct / d.total) * 100)}% accuracy (${d.correct}/${d.total})`)
+        .join('\n')}\n\nRECENT TEST PERFORMANCE:\n${recentTests
+          .map((test, i) => {
+            const c = Array.isArray(test.questions) ? test.questions.filter((x) => x.isCorrect).length : 0;
+            const t = Array.isArray(test.questions) ? test.questions.length : 0;
+            const a = t > 0 ? Math.round((c / t) * 100) : 0;
+            return `Test ${i + 1}: ${a}% accuracy (${c}/${t}) - ${test.testType} ${test.section}`;
+          })
+          .join('\n')}`;
+
+    if (returnFormat === 'json') {
+      const sorted = Object.entries(sectionPerformance).sort((a, b) => b[1].accuracy - a[1].accuracy);
+      const strongest = sorted[0] ? sorted[0][0] : 'N/A';
+      const weakest = sorted[sorted.length - 1] ? sorted[sorted.length - 1][0] : 'N/A';
+      return `${base}\n\nReturn your analysis as a JSON object with the following structure:\n{\n  "keyInsights": { "title": "Key Insights", "content": "...", "icon": "lightbulb", "severity": "info" },\n  "priorityActions": { "title": "Priority Actions", "content": "...", "icon": "flag", "severity": "warning" },\n  "studyPlan": { "title": "Study Plan", "items": ["...", "...", "..."], "icon": "book", "severity": "success" },\n  "testStrategy": { "title": "Test-Taking Strategy", "content": "...", "icon": "psychology", "severity": "info" },\n  "motivation": { "title": "Motivation & Goals", "content": "...", "icon": "trending_up", "severity": "success" },\n  "stats": { "overallScore": ${accuracy}, "strongestSection": "${strongest}", "weakestSection": "${weakest}", "totalQuestions": ${totalQuestions}, "testsCompleted": ${testResults.length} }\n}\n\nKeep each content section concise (under 100 words), specific to their data, and immediately actionable. Avoid generic advice.`;
     }
 
-    return fallbackQuestions;
-  }
-
-  // Prefetch next batch of questions in background
-  async prefetchNextBatch(moduleId, userLevel, nextStartIndex, batchSize = 5) {
-    try {
-      const nextBatch = await this.generateQuestionBatch(moduleId, userLevel, batchSize, nextStartIndex);
-
-      // Store in a simple cache
-      const cacheKey = `${moduleId}-${userLevel}-${nextStartIndex}`;
-      this.questionCache = this.questionCache || new Map();
-      this.questionCache.set(cacheKey, nextBatch);
-
-      console.log(`Prefetched batch starting at question ${nextStartIndex + 1}`);
-      return nextBatch;
-    } catch (error) {
-      console.error("Failed to prefetch next batch:", error);
-      return null;
-    }
-  }
-
-  // Get questions with lazy loading
-  async getQuestionsLazy(moduleId, userLevel, totalQuestions = 25) {
-    const batchSize = 5;
-    const firstBatch = await this.generateQuestionBatch(moduleId, userLevel, batchSize, 0);
-
-    // Start prefetching the next batch immediately
-    if (totalQuestions > batchSize) {
-      this.prefetchNextBatch(moduleId, userLevel, batchSize, batchSize);
-    }
-
-    return {
-      questions: firstBatch,
-      hasMore: totalQuestions > batchSize,
-      nextBatchIndex: batchSize,
-      totalQuestions,
-      batchSize
-    };
-  }
-
-  // Get next batch of questions
-  async getNextQuestionBatch(moduleId, userLevel, startIndex, batchSize = 5) {
-    const cacheKey = `${moduleId}-${userLevel}-${startIndex}`;
-
-    // Check cache first
-    if (this.questionCache && this.questionCache.has(cacheKey)) {
-      const cachedBatch = this.questionCache.get(cacheKey);
-      this.questionCache.delete(cacheKey); // Remove from cache after use
-
-      // Start prefetching the next batch
-      const nextStartIndex = startIndex + batchSize;
-      this.prefetchNextBatch(moduleId, userLevel, nextStartIndex, batchSize);
-
-      return cachedBatch;
-    }
-
-    // Generate batch if not in cache
-    const batch = await this.generateQuestionBatch(moduleId, userLevel, batchSize, startIndex);
-
-    // Start prefetching the next batch
-    const nextStartIndex = startIndex + batchSize;
-    this.prefetchNextBatch(moduleId, userLevel, nextStartIndex, batchSize);
-
-    return batch;
-  }
-
-  // Generate interactive lesson content
-  async generateLesson(moduleId, userLevel, retryCount = 0) {
-    const lessonPrompts = {
-      "vocabulary-basics": `Create an interactive vocabulary lesson for level ${userLevel} students. Include:
-        - 5 multiple-choice questions testing vocabulary in context
-        - Words commonly seen on GRE/GMAT tests (like: ameliorate, ubiquitous, perspicacious, etc.)
-        - Engaging explanations with memory techniques
-        - Difficulty appropriate for level ${userLevel}
-        - NO reading passage required - focus on vocabulary in sentence contexts`,
-
-      "advanced-vocabulary": `Create an advanced vocabulary lesson with:
-        - 6 challenging vocabulary questions using sophisticated words
-        - Words like: magnanimous, perfunctory, vacillate, sanguine, etc.
-        - Complex sentence contexts
-        - Level ${userLevel} difficulty
-        - NO reading passage required - use varied sentence contexts`,
-
-      "vocabulary-context": `Create a vocabulary-in-context lesson with:
-        - 5 questions where students must determine word meaning from context
-        - Include context clue strategies
-        - Mixed difficulty vocabulary words
-        - Level ${userLevel} appropriate
-        - NO reading passage required - use diverse sentence examples`,
-
-      "word-roots-prefixes": `Create a word roots and prefixes lesson with:
-        - 5 questions about breaking down unfamiliar words
-        - Focus on common roots (bene-, mal-, -ology, -phobia, etc.)
-        - Include word family connections
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on word analysis`,
-
-      "synonyms-antonyms": `Create a synonyms and antonyms lesson with:
-        - 5 questions testing word relationships
-        - Include nuanced differences between similar words
-        - Both synonym and antonym identification
-        - Level ${userLevel} appropriate
-        - NO reading passage required - use word comparison exercises`,
-
-      "reading-strategies": `Create a reading comprehension lesson with:
-        - A well-structured passage (200-250 words) about science, literature, or social issues
-        - 4 questions testing different reading skills (main idea, inference, details, tone)
-        - Strategy tips for each question type
-        - Level ${userLevel} difficulty`,
-
-      "passage-analysis": `Create a passage analysis lesson with:
-        - A complex argumentative passage (250-300 words)
-        - 5 questions analyzing structure, evidence, and reasoning
-        - Focus on critical analysis skills
-        - Level ${userLevel} complexity`,
-
-      "main-idea-details": `Create a main idea and supporting details lesson with:
-        - A descriptive or expository passage (200 words)
-        - 4 questions distinguishing main ideas from supporting details
-        - Include passage organization questions
-        - Level ${userLevel} appropriate`,
-
-      "inference-reasoning": `Create an inference and reasoning lesson with:
-        - A nuanced passage requiring careful reading (220-280 words)
-        - 5 questions requiring logical inference
-        - Include "what can be concluded" type questions
-        - Level ${userLevel} complexity`,
-
-      "tone-attitude": `Create a tone and attitude lesson with:
-        - A passage with clear authorial perspective (200-250 words)
-        - 4 questions about author's tone, attitude, and purpose
-        - Include bias detection questions
-        - Level ${userLevel} difficulty`,
-
-      "math-foundations": `Create a math fundamentals lesson with:
-        - 5 step-by-step arithmetic and basic algebra problems
-        - Clear explanations of mathematical concepts
-        - Include word problems and pure math
-        - Level ${userLevel} appropriate difficulty
-        - NO reading passage required - focus on mathematical problem-solving`,
-
-      "arithmetic-basics": `Create an arithmetic essentials lesson with:
-        - 5 problems covering fractions, decimals, percentages
-        - Include practical applications
-        - Step-by-step solution methods
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on numerical calculations`,
-
-      "basic-algebra": `Create a basic algebra lesson with:
-        - 5 linear equation and inequality problems
-        - Include variable manipulation and solving techniques
-        - Mix of pure algebra and word problems
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on algebraic concepts`,
-
-      "advanced-algebra": `Create an advanced algebra lesson with:
-        - 5 complex algebraic problems (polynomials, factoring, exponents)
-        - Include advanced techniques like completing the square
-        - Mix of abstract and applied problems
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on advanced algebraic concepts`,
-
-      "linear-equations": `Create a linear equations lesson with:
-        - 5 problems focusing on solving linear equations and inequalities
-        - Include graphing and system solving techniques
-        - Step-by-step algebraic manipulation
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on linear equation solving`,
-
-      "quadratic-equations": `Create a quadratic equations lesson with:
-        - 5 problems involving quadratic equations and functions
-        - Include factoring, quadratic formula, and graphing
-        - Real-world applications of quadratics
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on quadratic problem solving`,
-
-      "systems-equations": `Create a systems of equations lesson with:
-        - 5 problems solving multiple equations simultaneously
-        - Include substitution and elimination methods
-        - Mix of linear and non-linear systems
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on system solving techniques`,
-
-      "fractions-decimals": `Create a fractions and decimals lesson with:
-        - 5 problems covering fraction operations and decimal conversions
-        - Include mixed numbers and complex fraction operations
-        - Practical applications and comparisons
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on fraction/decimal calculations`,
-
-      "percentages-ratios": `Create a percentages and ratios lesson with:
-        - 5 problems involving percentage calculations and ratio/proportion
-        - Include percent change, ratio comparisons, and scaling
-        - Real-world applications (discounts, tips, proportional reasoning)
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on percentage and ratio problems`,
-
-      "geometry-basics": `Create a geometry fundamentals lesson with:
-        - 5 problems involving area, perimeter, angles, and basic shapes
-        - Include coordinate geometry concepts
-        - Visual problem-solving techniques
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on geometric calculations`,
-
-      "coordinate-geometry": `Create a coordinate geometry lesson with:
-        - 5 problems involving points, lines, and shapes on coordinate plane
-        - Include distance formula, midpoint, and slope calculations
-        - Graphing and coordinate transformations
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on coordinate geometry concepts`,
-
-      "triangles-polygons": `Create a triangles and polygons lesson with:
-        - 5 problems focusing on triangle properties and polygon characteristics
-        - Include area calculations, angle relationships, and similarity
-        - Mix of right triangles and general triangle problems
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on triangle and polygon properties`,
-
-      "circles-arcs": `Create a circles and arcs lesson with:
-        - 5 problems involving circle properties and arc measurements
-        - Include circumference, area, central/inscribed angles
-        - Sector and arc length calculations
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on circle geometry`,
-
-      "solid-geometry": `Create a 3D geometry lesson with:
-        - 5 problems calculating volumes and surface areas of 3D shapes
-        - Include cubes, spheres, cylinders, pyramids, and prisms
-        - Real-world applications of 3D measurements
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on 3D geometric calculations`,
-
-      "data-interpretation": `Create a data interpretation lesson with:
-        - 4 problems analyzing charts, graphs, and tables
-        - Include percentage calculations and comparisons
-        - Real-world data scenarios
-        - Level ${userLevel} complexity
-        - NO reading passage required - focus on data analysis skills`,
-
-      "statistics-basics": `Create a statistics fundamentals lesson with:
-        - 5 problems involving mean, median, mode, and range calculations
-        - Include data set analysis and interpretation
-        - Mix of discrete and continuous data problems
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on basic statistical concepts`,
-
-      "probability-basics": `Create a probability concepts lesson with:
-        - 5 problems calculating basic probabilities and chance
-        - Include combinations, permutations, and conditional probability
-        - Real-world probability scenarios
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on probability calculations`,
-
-      "advanced-statistics": `Create an advanced statistics lesson with:
-        - 5 problems involving standard deviation, correlation, and distributions
-        - Include normal distribution and statistical inference
-        - Complex statistical analysis scenarios
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on advanced statistical concepts`,
-
-      "critical-reasoning": `Create a critical reasoning lesson with:
-        - 4 logical reasoning problems with clear arguments
-        - Different argument types (strengthen, weaken, assumption)
-        - Clear explanation of logical structures
-        - Level ${userLevel} complexity
-        - NO reading passage required - focus on argument analysis`,
-
-      "argument-structure": `Create an argument structure lesson with:
-        - 5 problems analyzing logical arguments
-        - Focus on premises, conclusions, and logical flow
-        - Include argument identification and evaluation
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on logical reasoning`,
-
-      "problem-solving-strategies": `Create a problem-solving strategies lesson with:
-        - 4 multi-step problems requiring strategic thinking
-        - Include estimation and elimination techniques
-        - Mix of verbal and quantitative reasoning
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on strategic problem solving`,
-
-      "estimation-techniques": `Create an estimation and approximation lesson with:
-        - 5 problems focusing on quick calculation methods
-        - Include rounding, benchmarking, and mental math
-        - Time-saving estimation strategies
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on estimation skills`,
-
-      "time-management": `Create a time management lesson with:
-        - 4 practice scenarios with time constraints
-        - Include pacing strategies and priority setting
-        - Test-taking time optimization techniques
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on time management strategies`,
-
-      "elimination-strategies": `Create an answer elimination lesson with:
-        - 5 problems demonstrating elimination techniques
-        - Include logical reasoning and process of elimination
-        - Strategic approach to multiple choice questions
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on elimination strategies`,
-
-      "exponentials-logarithms": `Create an exponentials and logarithms lesson with:
-        - 5 problems involving exponential and logarithmic functions
-        - Include growth/decay models and logarithmic properties
-        - Advanced mathematical applications
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on exponential and logarithmic concepts`,
-
-      "sequences-series": `Create a sequences and series lesson with:
-        - 5 problems involving arithmetic and geometric sequences
-        - Include series summation and pattern recognition
-        - Mathematical sequence applications
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on sequence and series concepts`,
-
-      "grammar-essentials": `Create a grammar essentials lesson with:
-        - 5 problems focusing on fundamental grammar rules
-        - Include subject-verb agreement, tense consistency, and punctuation
-        - Common grammar errors and corrections
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on grammar fundamentals`,
-
-      "sentence-structure": `Create a sentence structure lesson with:
-        - 5 problems improving sentence clarity and style
-        - Include parallel structure, modifier placement, and conciseness
-        - Sentence combining and revision techniques
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on sentence construction`,
-
-      "essay-writing": `Create an essay writing strategies lesson with:
-        - 4 problems focusing on essay structure and organization
-        - Include thesis development, paragraph structure, and transitions
-        - Argumentative and analytical writing techniques
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on essay writing skills`,
-
-      "rhetorical-analysis": `Create a rhetorical analysis lesson with:
-        - 4 problems analyzing rhetorical devices and effectiveness
-        - Include ethos, pathos, logos, and persuasive techniques
-        - Critical analysis of argumentative strategies
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on rhetorical analysis skills`,
-
-      "gre-specific-strategies": `Create a GRE-specific strategies lesson with:
-        - 5 problems using GRE-specific techniques and approaches
-        - Include text completion, sentence equivalence, and quantitative comparison
-        - GRE format-specific strategies
-        - Level ${userLevel} appropriate
-        - NO reading passage required - focus on GRE-specific techniques`,
-
-      "gmat-specific-strategies": `Create a GMAT-specific strategies lesson with:
-        - 5 problems using GMAT-specific techniques and approaches
-        - Include data sufficiency, critical reasoning, and integrated reasoning
-        - GMAT format-specific strategies
-        - Level ${userLevel} difficulty
-        - NO reading passage required - focus on GMAT-specific techniques`,
-    };
-
-    // Determine if this module needs a passage
-    const passageModules = [
-      "reading-strategies",
-      "passage-analysis",
-      "main-idea-details",
-      "inference-reasoning",
-      "tone-attitude",
-    ];
-
-    const requiresPassage = passageModules.includes(moduleId);
-
-    const baseStructure = {
-      id: `${moduleId}-lesson-${Date.now()}`,
-      title: "Engaging Lesson Title",
-      description: "Brief lesson description",
-      questions: [
-        {
-          question: "Question text with context",
-          options: ["Option A", "Option B", "Option C", "Option D"],
-          correctAnswer: 0,
-          explanation:
-            "Detailed explanation with learning tips and strategy advice",
-        },
-      ],
-      tips: ["Study tip 1", "Study tip 2", "Strategy tip 3"],
-      nextSteps: "What to practice next",
-    };
-
-    if (requiresPassage) {
-      baseStructure.passage =
-        "Include a well-written passage here for reading comprehension";
-    }
-
-    const prompt = `You are an expert test preparation instructor creating an engaging lesson for ${moduleId} at level ${userLevel}.
-
-${lessonPrompts[moduleId] || lessonPrompts["vocabulary-basics"]}
-
-CRITICAL: Return ONLY a valid JSON object. No markdown, no explanation, no extra text.
-
-Required JSON structure:
-{
-  "id": "${moduleId}-lesson-${Date.now()}",
-  "title": "Engaging lesson title",
-  "description": "Brief description of what students will learn",
-  "practiceQuestions": [
-    {
-      "id": 1,
-      "question": "Clear question text",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": 0,
-      "explanation": "Detailed explanation with learning strategies",
-      "concept": "Key concept being tested",
-      "difficulty": "easy|medium|hard"
-    }
-  ],
-  "tips": ["Practical study tip", "Strategy advice"],
-  "nextSteps": "What to practice next for improvement"
-}
-
-${requiresPassage ? 'Include a "passage" field with a well-written 200-300 word passage for reading comprehension.' : ''}
-
-Make the lesson engaging and educational. Generate ONLY the JSON object:`;
-
-    const data = {
-      model: retryCount === 0 ? "anthropic/claude-3.5-sonnet-20241022" : "google/gemini-2.5-flash-lite",
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 2500,
-    };
-
-    try {
-      const response = await this.makeRequest("/chat/completions", data);
-      const content = response.choices[0].message.content;
-
-      // Use robust JSON parsing
-      const lesson = this.cleanAndParseJSON(content);
-
-      if (this.validateLesson(lesson)) {
-        // Transform to expected format if needed
-        if (lesson.questions && !lesson.practiceQuestions) {
-          lesson.practiceQuestions = lesson.questions;
-        }
-        return lesson;
-      } else {
-        throw new Error("Generated lesson failed validation");
-      }
-    } catch (error) {
-      console.error(
-        `Failed to generate lesson (attempt ${retryCount + 1}):`,
-        error
-      );
-
-      if (retryCount < this.maxRetries) {
-        await this.delay(this.calculateDelay(retryCount));
-        return this.generateLesson(moduleId, userLevel, retryCount + 1);
-      }
-
-      // Use dynamic AI fallback instead of hardcoded lessons
-      console.warn("All AI generation attempts failed, trying dynamic fallback");
-      return await this.generateFallbackLesson(moduleId);
-    }
-  }
-
-  // Validate lesson structure
-  validateLesson(lesson) {
-    if (!lesson || typeof lesson !== 'object') {
-      console.log('Validation failed: Not an object');
-      return false;
-    }
-
-    // Check title
-    if (!lesson.title || typeof lesson.title !== "string") {
-      console.log('Validation failed: Invalid title');
-      return false;
-    }
-
-    // Check for questions (either 'questions' or 'practiceQuestions')
-    const questions = lesson.questions || lesson.practiceQuestions;
-    if (!Array.isArray(questions)) {
-      console.log('Validation failed: No questions array found');
-      return false;
-    }
-
-    if (questions.length === 0) {
-      console.log('Validation failed: Empty questions array');
-      return false;
-    }
-
-    // Validate each question
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      if (!q || typeof q !== 'object') {
-        console.log(`Validation failed: Question ${i} is not an object`);
-        return false;
-      }
-
-      if (typeof q.question !== "string" || q.question.trim().length < 3) {
-        console.log(`Validation failed: Question ${i} has invalid question text`);
-        return false;
-      }
-
-      if (!Array.isArray(q.options) || q.options.length < 4) {
-        console.log(`Validation failed: Question ${i} has invalid options`);
-        return false;
-      }
-
-      if (typeof q.correctAnswer !== "number" || q.correctAnswer < 0 || q.correctAnswer >= q.options.length) {
-        console.log(`Validation failed: Question ${i} has invalid correctAnswer`);
-        return false;
-      }
-
-      if (typeof q.explanation !== "string" || q.explanation.trim().length < 3) {
-        console.log(`Validation failed: Question ${i} has invalid explanation`);
-        return false;
-      }
-    }
-
-    console.log('Lesson validation passed');
-    return true;
-  }
-
-  // Dynamic fallback lesson generator using simpler prompts
-  async generateFallbackLesson(moduleId) {
-    const simplePrompt = `Create a simple educational lesson for ${moduleId}. Return only this JSON:
-{
-  "title": "Lesson Title",
-  "practiceQuestions": [
-    {
-      "id": 1,
-      "question": "Question text?",
-      "options": ["A", "B", "C", "D"],
-      "correctAnswer": 0,
-      "explanation": "Simple explanation"
-    },
-    {
-      "id": 2,
-      "question": "Another question?",
-      "options": ["A", "B", "C", "D"],
-      "correctAnswer": 1,
-      "explanation": "Another explanation"
-    }
-  ]
-}`;
-
-    try {
-      const response = await this.makeRequest("/chat/completions", {
-        model: "meta-llama/llama-3.1-8b-instruct:free",
-        messages: [{ role: "user", content: simplePrompt }],
-        temperature: 0.3,
-        max_tokens: 1000,
-      });
-
-      const lesson = this.cleanAndParseJSON(response.choices[0].message.content);
-
-      if (this.validateLesson(lesson)) {
-        return lesson;
-      }
-    } catch (error) {
-      console.error("Dynamic fallback failed:", error);
-    }
-
-    // Ultimate fallback - create a minimal lesson programmatically
-    return {
-      id: `${moduleId}-minimal-fallback`,
-      title: `${moduleId.replace(/-/g, ' ')} Practice`,
-      description: "Basic practice questions to get you started",
-      practiceQuestions: [
-        {
-          id: 1,
-          question: "This is a sample question to demonstrate the format. What is the best approach to learning?",
-          options: ["Practice regularly", "Study once", "Skip difficult topics", "Memorize answers"],
-          correctAnswer: 0,
-          explanation: "Regular practice is the most effective way to improve your skills and build confidence.",
-          concept: "Learning strategies",
-          difficulty: "easy"
-        },
-        {
-          id: 2,
-          question: "When preparing for tests, which strategy is most effective?",
-          options: ["Cramming the night before", "Consistent daily practice", "Reading only", "Guessing strategies"],
-          correctAnswer: 1,
-          explanation: "Consistent daily practice helps build lasting knowledge and reduces test anxiety.",
-          concept: "Test preparation",
-          difficulty: "easy"
-        }
-      ],
-      tips: ["Practice regularly", "Focus on understanding concepts", "Review your mistakes"],
-      nextSteps: "Continue practicing with more advanced questions"
-    };
+    return `${base}\n\nPlease provide a concise, personalized analysis focusing on:\n\n1. **Key Insights**\n2. **Priority Actions**\n3. **Specific Study Plan**\n4. **Test-Taking Strategy**\n5. **Motivation**\n\nKeep it concise (under 300 words), specific to their data, and immediately actionable. Avoid generic advice.`;
   }
 }
 
-export default new OpenRouterService();
+const openRouterService = new OpenRouterService();
+
+export const aiApi = {
+  generation: {
+    generateQuestion: (...args) => openRouterService.generateQuestion(...args),
+  },
+  evaluation: {
+    evaluatePerformance: (...args) => openRouterService.evaluatePerformance(...args),
+    evaluatePerformanceWithFormat: (...args) => openRouterService.evaluatePerformanceWithFormat(...args),
+  },
+  study: {
+    getStudyRecommendations: (...args) => openRouterService.getStudyRecommendations(...args),
+  },
+  utils: {
+    cleanAndParseJSON: (...args) => openRouterService.cleanAndParseJSON(...args),
+    generateQuickInsights: (...args) => openRouterService.generateQuickInsights(...args),
+  },
+};
+
+export default openRouterService;

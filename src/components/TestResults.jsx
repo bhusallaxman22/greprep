@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from "react";
 import {
   Container,
   Card,
@@ -14,8 +14,8 @@ import {
   AccordionDetails,
   Alert,
   CircularProgress,
-  Divider
-} from '@mui/material';
+  Divider,
+} from "@mui/material";
 import {
   CheckCircle,
   Cancel,
@@ -23,57 +23,30 @@ import {
   Home,
   Refresh,
   TrendingUp,
-  Assessment
-} from '@mui/icons-material';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+  Assessment,
+} from "@mui/icons-material";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  Legend,
+} from "recharts";
 import AIInsights from "./AIInsights";
+import useTestResultsEvaluation from "../hooks/useTestResultsEvaluation";
 
 const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
-  const [aiEvaluation, setAiEvaluation] = useState('');
-  const [aiInsights, setAiInsights] = useState(null);
-  const [isLoadingEvaluation, setIsLoadingEvaluation] = useState(false);
-
-  useEffect(() => {
-    if (testResult) {
-      const loadAIEvaluation = async () => {
-        setIsLoadingEvaluation(true);
-        try {
-          // Import the service here to avoid circular dependencies
-          const { default: openRouterService } = await import(
-            "../services/openrouter"
-          );
-
-          // Get both text and JSON format insights
-          const [evaluation, insights] = await Promise.all([
-            openRouterService.evaluatePerformance([testResult]),
-            openRouterService.evaluatePerformanceWithFormat(
-              [testResult],
-              "json"
-            ),
-          ]);
-
-          setAiEvaluation(evaluation);
-          setAiInsights(insights);
-        } catch (error) {
-          console.error("AI evaluation failed:", error);
-          setAiEvaluation(
-            "AI evaluation temporarily unavailable. Please check your OpenRouter API configuration."
-          );
-        } finally {
-          setIsLoadingEvaluation(false);
-        }
-      };
-
-      loadAIEvaluation();
-    }
-  }, [testResult]);
+  const {
+    aiEvaluation,
+    aiInsights,
+    isLoading: isLoadingEvaluation,
+  } = useTestResultsEvaluation(testResult);
 
   if (!testResult) {
     return (
       <Container maxWidth="md" sx={{ mt: 4 }}>
-        <Alert severity="error">
-          No test results available.
-        </Alert>
+        <Alert severity="error">No test results available.</Alert>
         <Button onClick={onReturnToDashboard} sx={{ mt: 2 }}>
           Return to Dashboard
         </Button>
@@ -81,28 +54,35 @@ const TestResults = ({ testResult, onReturnToDashboard, onRetakeTest }) => {
     );
   }
 
-  const correctAnswers = testResult.questions.filter(q => q.isCorrect).length;
+  const correctAnswers = testResult.questions.filter((q) => q.isCorrect).length;
   const totalQuestions = testResult.questions.length;
   const accuracy = Math.round((correctAnswers / totalQuestions) * 100);
-  const totalTimeSpent = testResult.questions.reduce((sum, q) => sum + (q.timeSpent || 0), 0);
+  const totalTimeSpent = testResult.questions.reduce(
+    (sum, q) => sum + (q.timeSpent || 0),
+    0
+  );
   const averageTimePerQuestion = Math.round(totalTimeSpent / totalQuestions);
 
   // Data for pie chart
   const chartData = [
-    { name: 'Correct', value: correctAnswers, color: '#4caf50' },
-    { name: 'Incorrect', value: totalQuestions - correctAnswers, color: '#f44336' }
+    { name: "Correct", value: correctAnswers, color: "#4caf50" },
+    {
+      name: "Incorrect",
+      value: totalQuestions - correctAnswers,
+      color: "#f44336",
+    },
   ];
 
   const getAccuracyColor = (acc) => {
-    if (acc >= 80) return 'success';
-    if (acc >= 60) return 'warning';
-    return 'error';
+    if (acc >= 80) return "success";
+    if (acc >= 60) return "warning";
+    return "error";
   };
 
   const formatTime = (seconds) => {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
   };
 
   return (

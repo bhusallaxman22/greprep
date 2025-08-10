@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
+import React, { useState } from "react";
+import { ThemeProvider, createTheme } from "@mui/material/styles";
+import CssBaseline from "@mui/material/CssBaseline";
 import {
   Box,
   AppBar,
@@ -31,8 +31,19 @@ import UserProfile from "./components/UserProfile";
 import ModuleLearning from "./components/ModuleLearning";
 import EnhancedLearning from "./components/EnhancedLearning";
 import About from "./components/About";
-import firebaseService from "./services/firebase";
-import openRouterService from "./services/openrouter";
+import APP_STATES from "./constants/appStates";
+import useMenu from "./hooks/useMenu";
+import useTestFlow from "./hooks/useTestFlow";
+
+// SEO Components
+import SimpleSEOHead from "./components/atoms/SimpleSEOHead";
+import {
+  SEOLandingHero,
+  SEOFeatureSection,
+  SEOTestTypesSection,
+} from "./components/organisms/SEOLandingContent";
+import seoConfig from "./constants/seoConfig";
+import { SEO_PAGES, STRUCTURED_DATA } from "./constants/seoConfig";
 
 // Create a clean, minimal theme with animations
 const theme = createTheme({
@@ -187,350 +198,75 @@ const theme = createTheme({
   },
 });
 
-// App states
-const APP_STATES = {
-  DASHBOARD: "dashboard",
-  TEST_SELECTION: "test_selection",
-  TEST_IN_PROGRESS: "test_in_progress",
-  TEST_RESULTS: "test_results",
-  LEARNING: "learning",
-  MODULE_LEARNING: "module_learning",
-  ABOUT: "about",
-};
-
 function AppContent() {
   const { user } = useAuth();
   const [appState, setAppState] = useState(APP_STATES.DASHBOARD);
-  const [testConfig, setTestConfig] = useState(null);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState([]);
-  const [testResult, setTestResult] = useState(null);
-  const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
-  const [preloadingQuestions, setPreloadingQuestions] = useState(new Set()); // Track which questions are being preloaded
-  const [error, setError] = useState("");
+  const { anchorEl, isOpen, openMenu, closeMenu } = useMenu();
   const [showProfile, setShowProfile] = useState(false);
-  const [anchorEl, setAnchorEl] = useState(null);
-  const [currentModule, setCurrentModule] = useState(null);
+  const [selectedModule, setSelectedModule] = useState(null);
 
-  const handleMenuOpen = (event) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
+  // Centralize test-taking flow in a hook
+  const {
+    testConfig,
+    questions,
+    currentQuestionIndex,
+    currentQuestion,
+    currentAnswer,
+    isLoadingQuestion,
+    testResult,
+    startTest,
+    handleAnswer,
+    nextQuestion,
+    previousQuestion,
+    finishTest,
+    reset,
+    retakeTest,
+    error,
+    clearError,
+  } = useTestFlow(user);
 
   const navigateToAbout = () => {
     setAppState(APP_STATES.ABOUT);
-    handleMenuClose();
+    closeMenu();
   };
-
   const navigateToDashboard = () => {
     setAppState(APP_STATES.DASHBOARD);
-    handleMenuClose();
+    closeMenu();
   };
-
   const navigateToLearning = () => {
     setAppState(APP_STATES.LEARNING);
-    handleMenuClose();
+    closeMenu();
   };
 
-  // Don't auto sign in as guest anymore - let user choose
-
-  const showError = (message) => {
-    setError(message);
-  };
-
-  const clearError = () => {
-    setError("");
-  };
-
-  const startTestSelection = () => {
-    setAppState(APP_STATES.TEST_SELECTION);
-  };
-
-  const startLearning = () => {
-    setAppState(APP_STATES.LEARNING);
-  };
-
+  const startTestSelection = () => setAppState(APP_STATES.TEST_SELECTION);
+  const startLearning = () => setAppState(APP_STATES.LEARNING);
   const startModule = (module) => {
-    setCurrentModule(module);
+    setSelectedModule(module);
     setAppState(APP_STATES.MODULE_LEARNING);
   };
-
-  const returnToLearning = () => {
-    setCurrentModule(null);
-    setAppState(APP_STATES.LEARNING);
-  };
-
-  const startTest = async (config) => {
-    setTestConfig(config);
-    setQuestions([]);
-    setAnswers(new Array(config.questionCount).fill(null));
-    setCurrentQuestionIndex(0);
-    setPreloadingQuestions(new Set()); // Clear preloading state
-    setAppState(APP_STATES.TEST_IN_PROGRESS);
-
-    // Start generating the first question
-    await generateQuestion(0, false, config);
-  };
-
-  const generateQuestion = async (
-    questionIndex,
-    isPreload = false,
-    config = null
-  ) => {
-    // For preloading, check if already being preloaded
-    if (isPreload && preloadingQuestions.has(questionIndex)) {
-      console.log(
-        `Question ${questionIndex + 1} is already being preloaded, skipping`
-      );
-      return;
-    }
-
-    // Mark as being preloaded if it's a preload operation
-    if (isPreload) {
-      setPreloadingQuestions((prev) => new Set([...prev, questionIndex]));
-    }
-
-    if (!isPreload) {
-      setIsLoadingQuestion(true);
-    }
-    try {
-      const currentConfig = config || testConfig;
-
-      // Guard against null testConfig
-      if (!currentConfig || !currentConfig.testType || !currentConfig.section) {
-        console.error("Invalid test configuration:", currentConfig);
-        throw new Error("Test configuration is not available");
-      }
-
-      console.log(
-        `${isPreload ? "Preloading" : "Generating"} question ${
-          questionIndex + 1
-        } for ${currentConfig.testType} ${currentConfig.section} ${
-          currentConfig.difficulty
-        }`
-      );
-
-      const question = await openRouterService.generateQuestion(
-        currentConfig.testType,
-        currentConfig.section,
-        currentConfig.difficulty
-      );
-
-      console.log(
-        `Successfully ${isPreload ? "preloaded" : "generated"} question ${
-          questionIndex + 1
-        }:`,
-        question
-      );
-
-      // Update questions array at specific index
-      setQuestions((prevQuestions) => {
-        const newQuestions = [...prevQuestions];
-        newQuestions[questionIndex] = question;
-        return newQuestions;
-      });
-
-      // Preload the next 2 questions in the background if this is not already a preload
-      if (!isPreload && questionIndex < currentConfig.questionCount - 1) {
-        // Simple preloading - no complex state checks that might interfere
-        setTimeout(() => {
-          const nextIndex = questionIndex + 1;
-          if (!preloadingQuestions.has(nextIndex)) {
-            generateQuestion(nextIndex, true, currentConfig);
-          }
-        }, 500);
-
-        setTimeout(() => {
-          const nextNextIndex = questionIndex + 2;
-          if (
-            nextNextIndex < currentConfig.questionCount &&
-            !preloadingQuestions.has(nextNextIndex)
-          ) {
-            generateQuestion(nextNextIndex, true, currentConfig);
-          }
-        }, 1000);
-      }
-
-      // Return the generated question so nextQuestion can use it immediately
-      return question;
-    } catch (error) {
-      console.error(`Failed to generate question ${questionIndex + 1}:`, error);
-      if (!isPreload) {
-        // For main question generation failures, show error to user
-        showError(
-          `Failed to generate question ${questionIndex + 1}. ${
-            error.message || "Please try again."
-          }`
-        );
-        // Re-throw error so nextQuestion can handle it
-        throw error;
-      } else {
-        // For preload failures, just log and continue silently
-        console.warn(
-          `Preload failed for question ${
-            questionIndex + 1
-          }, will generate when needed`
-        );
-        // Don't re-throw for preload failures to avoid breaking user experience
-        return null;
-      }
-    } finally {
-      // Clean up preloading state
-      if (isPreload) {
-        setPreloadingQuestions((prev) => {
-          const newSet = new Set(prev);
-          newSet.delete(questionIndex);
-          return newSet;
-        });
-      }
-
-      if (!isPreload) {
-        setIsLoadingQuestion(false);
-      }
-    }
-  };
-  const handleAnswer = (answerIndex, timeSpent) => {
-    const newAnswers = [...answers];
-    newAnswers[currentQuestionIndex] = {
-      answerIndex,
-      timeSpent,
-    };
-    setAnswers(newAnswers);
-  };
-
-  const nextQuestion = async () => {
-    try {
-      const nextIndex = currentQuestionIndex + 1;
-      if (nextIndex < testConfig.questionCount) {
-        // If the next question doesn't exist, generate it first
-        if (!questions[nextIndex]) {
-          console.log(
-            `Question ${nextIndex + 1} not preloaded, generating now...`
-          );
-          const generatedQuestion = await generateQuestion(nextIndex, false); // false = not preload, will show loading state
-
-          // Ensure we have the question before proceeding
-          if (!generatedQuestion) {
-            throw new Error("Failed to generate question");
-          }
-        } else {
-          console.log(
-            `Question ${nextIndex + 1} already available, proceeding...`
-          );
-        }
-
-        // Only update the index after we're sure the question exists
-        setCurrentQuestionIndex(nextIndex);
-
-        // Trigger preloading of upcoming questions (in background)
-        setTimeout(() => {
-          const nextNextIndex = nextIndex + 1;
-          if (
-            nextNextIndex < testConfig.questionCount &&
-            !preloadingQuestions.has(nextNextIndex)
-          ) {
-            generateQuestion(nextNextIndex, true, testConfig);
-          }
-        }, 100);
-
-        setTimeout(() => {
-          const nextNextNextIndex = nextIndex + 2;
-          if (
-            nextNextNextIndex < testConfig.questionCount &&
-            !preloadingQuestions.has(nextNextNextIndex)
-          ) {
-            generateQuestion(nextNextNextIndex, true, testConfig);
-          }
-        }, 300);
-      }
-    } catch (error) {
-      console.error("Error in nextQuestion:", error);
-      showError(
-        `Failed to load next question. ${error.message || "Please try again."}`
-      );
-    }
-  };
-  const previousQuestion = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-    }
-  };
-
-  const finishTest = async () => {
-    try {
-      // Calculate results
-      const testQuestions = questions.map((question, index) => {
-        const userAnswer = answers[index];
-        const isCorrect = userAnswer
-          ? userAnswer.answerIndex === question.correctAnswer
-          : false;
-
-        return {
-          ...question, // Include all original question fields
-          userAnswer: userAnswer?.answerIndex || -1,
-          isCorrect,
-          timeSpent: userAnswer?.timeSpent || 0,
-          // Ensure these fields are present
-          testType: question.testType || testConfig.testType,
-          section: question.section || testConfig.section,
-          difficulty: question.difficulty || testConfig.difficulty,
-        };
-      });
-
-      const result = {
-        userId: user.uid,
-        testType: testConfig.testType,
-        section: testConfig.section,
-        difficulty: testConfig.difficulty,
-        questions: testQuestions,
-        createdAt: new Date().toISOString(),
-      };
-
-      // Save to Firebase
-      await firebaseService.saveTestResult(result);
-
-      // Save individual question responses
-      for (const question of testQuestions) {
-        await firebaseService.saveQuestionResponse(
-          user.uid,
-          question,
-          question.userAnswer,
-          question.isCorrect,
-          question.timeSpent
-        );
-      }
-
-      setTestResult(result);
-      setAppState(APP_STATES.TEST_RESULTS);
-    } catch (error) {
-      console.error("Failed to save test results:", error);
-      showError("Failed to save test results. Please try again.");
-    }
-  };
+  const returnToLearning = () => setAppState(APP_STATES.LEARNING);
 
   const returnToDashboard = () => {
     setAppState(APP_STATES.DASHBOARD);
-    setTestConfig(null);
-    setQuestions([]);
-    setAnswers([]);
-    setTestResult(null);
-    setCurrentQuestionIndex(0);
+    reset();
   };
 
-  const retakeTest = () => {
-    if (testConfig) {
-      startTest(testConfig);
-    } else {
-      setAppState(APP_STATES.TEST_SELECTION);
-    }
+  const startTestAndGo = async (config) => {
+    await startTest(config);
+    setAppState(APP_STATES.TEST_IN_PROGRESS);
   };
 
-  const currentQuestion = questions[currentQuestionIndex];
-  const currentAnswer = answers[currentQuestionIndex];
+  const handleFinishAndGo = async () => {
+    await finishTest();
+    setAppState(APP_STATES.TEST_RESULTS);
+  };
+
+  const handleRetake = async () => {
+    await retakeTest();
+    setAppState(APP_STATES.TEST_IN_PROGRESS);
+  };
+
+  const currentTotal = testConfig?.questionCount || 0;
 
   return (
     <ThemeProvider theme={theme}>
@@ -561,36 +297,25 @@ function AppContent() {
             </Typography>
             {user && (
               <>
-                <IconButton
-                  color="inherit"
-                  onClick={handleMenuOpen}
-                  sx={{ mr: 1 }}
-                >
+                <IconButton color="inherit" onClick={openMenu} sx={{ mr: 1 }}>
                   <MenuBook />
                 </IconButton>
                 <Menu
                   anchorEl={anchorEl}
-                  open={Boolean(anchorEl)}
-                  onClose={handleMenuClose}
-                  PaperProps={{
-                    sx: {
-                      mt: 1,
-                      borderRadius: 2,
-                      boxShadow: 3,
-                    },
+                  open={isOpen}
+                  onClose={closeMenu}
+                  slotProps={{
+                    paper: { sx: { mt: 1, borderRadius: 2, boxShadow: 3 } },
                   }}
                 >
                   <MenuItem onClick={navigateToDashboard}>
-                    <Home sx={{ mr: 1 }} />
-                    Dashboard
+                    <Home sx={{ mr: 1 }} /> Dashboard
                   </MenuItem>
                   <MenuItem onClick={navigateToLearning}>
-                    <MenuBook sx={{ mr: 1 }} />
-                    Learning
+                    <MenuBook sx={{ mr: 1 }} /> Learning
                   </MenuItem>
                   <MenuItem onClick={navigateToAbout}>
-                    <Info sx={{ mr: 1 }} />
-                    About
+                    <Info sx={{ mr: 1 }} /> About
                   </MenuItem>
                 </Menu>
                 <Button
@@ -599,9 +324,7 @@ function AppContent() {
                   onClick={() => setShowProfile(true)}
                   sx={{
                     borderRadius: 2,
-                    "&:hover": {
-                      backgroundColor: "rgba(255,255,255,0.1)",
-                    },
+                    "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
                   }}
                 >
                   {user.isAnonymous
@@ -620,37 +343,81 @@ function AppContent() {
           ) : (
             <>
               {appState === APP_STATES.DASHBOARD && (
-                <Dashboard
-                  onStartTest={startTestSelection}
-                  onStartLearning={startLearning}
-                />
+                <>
+                  <SimpleSEOHead
+                    title={seoConfig.SEO_PAGES.HOME.title}
+                    description={seoConfig.SEO_PAGES.HOME.description}
+                    keywords={seoConfig.SEO_PAGES.HOME.keywords}
+                    canonical={seoConfig.SEO_PAGES.HOME.canonical}
+                    jsonLd={[
+                      seoConfig.STRUCTURED_DATA.WEBSITE,
+                      seoConfig.STRUCTURED_DATA.SOFTWARE_APPLICATION,
+                    ]}
+                  />
+                  <SEOLandingHero />
+                  <SEOFeatureSection />
+                  <SEOTestTypesSection />
+                  <Dashboard
+                    onStartTest={startTestSelection}
+                    onStartLearning={startLearning}
+                  />
+                </>
               )}
               {appState === APP_STATES.TEST_SELECTION && (
-                <TestSelection
-                  onStartTest={startTest}
-                  onBack={returnToDashboard}
-                />
+                <>
+                  <SimpleSEOHead
+                    title={seoConfig.SEO_PAGES.TEST_SELECTION.title}
+                    description={seoConfig.SEO_PAGES.TEST_SELECTION.description}
+                    keywords={seoConfig.SEO_PAGES.TEST_SELECTION.keywords}
+                    canonical={seoConfig.SEO_PAGES.TEST_SELECTION.canonical}
+                    jsonLd={seoConfig.STRUCTURED_DATA.COURSE}
+                  />
+                  <TestSelection
+                    onStartTest={startTestAndGo}
+                    onBack={returnToDashboard}
+                  />
+                </>
               )}
               {appState === APP_STATES.TEST_IN_PROGRESS && (
-                <QuestionDisplay
-                  question={currentQuestion}
-                  questionNumber={currentQuestionIndex + 1}
-                  totalQuestions={testConfig.questionCount}
-                  onAnswer={handleAnswer}
-                  onNext={nextQuestion}
-                  onPrevious={previousQuestion}
-                  onFinish={finishTest}
-                  selectedAnswer={currentAnswer?.answerIndex}
-                  isLoading={isLoadingQuestion}
-                  questionsArray={questions}
-                />
+                <>
+                  <SimpleSEOHead
+                    title={seoConfig.SEO_PAGES.QUESTION_PRACTICE.title}
+                    description={
+                      seoConfig.SEO_PAGES.QUESTION_PRACTICE.description
+                    }
+                    keywords={seoConfig.SEO_PAGES.QUESTION_PRACTICE.keywords}
+                    canonical={seoConfig.SEO_PAGES.QUESTION_PRACTICE.canonical}
+                    jsonLd={seoConfig.STRUCTURED_DATA.COURSE}
+                  />
+                  <QuestionDisplay
+                    question={currentQuestion}
+                    questionNumber={currentQuestionIndex + 1}
+                    totalQuestions={currentTotal}
+                    onAnswer={handleAnswer}
+                    onNext={nextQuestion}
+                    onPrevious={previousQuestion}
+                    onFinish={handleFinishAndGo}
+                    selectedAnswer={currentAnswer?.answerIndex}
+                    isLoading={isLoadingQuestion}
+                    questionsArray={questions}
+                  />
+                </>
               )}
               {appState === APP_STATES.TEST_RESULTS && (
-                <TestResults
-                  testResult={testResult}
-                  onReturnToDashboard={returnToDashboard}
-                  onRetakeTest={retakeTest}
-                />
+                <>
+                  <SimpleSEOHead
+                    title={seoConfig.SEO_PAGES.TEST_RESULTS.title}
+                    description={seoConfig.SEO_PAGES.TEST_RESULTS.description}
+                    keywords={seoConfig.SEO_PAGES.TEST_RESULTS.keywords}
+                    canonical={seoConfig.SEO_PAGES.TEST_RESULTS.canonical}
+                    jsonLd={seoConfig.STRUCTURED_DATA.SOFTWARE_APPLICATION}
+                  />
+                  <TestResults
+                    testResult={testResult}
+                    onReturnToDashboard={returnToDashboard}
+                    onRetakeTest={handleRetake}
+                  />
+                </>
               )}
               {appState === APP_STATES.LEARNING && (
                 <EnhancedLearning
@@ -660,10 +427,10 @@ function AppContent() {
               )}
               {appState === APP_STATES.MODULE_LEARNING && (
                 <ModuleLearning
-                  module={currentModule}
+                  module={selectedModule}
                   onBack={returnToLearning}
                 />
-              )}{" "}
+              )}
               {appState === APP_STATES.ABOUT && (
                 <About onBack={returnToDashboard} />
               )}
