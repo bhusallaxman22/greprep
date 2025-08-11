@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import firebaseService from '../services/firebase';
 import openRouterService from '../services/openrouter';
+import { resetSessionCounters, getUsageStats, checkUsageWarnings } from '../services/rateLimiter';
 
 export default function useTestFlow(user) {
     const [testConfig, setTestConfig] = useState(null);
@@ -80,6 +81,9 @@ export default function useTestFlow(user) {
     }, [preloadingQuestions, showError, testConfig]);
 
     const startTest = useCallback(async (config) => {
+        // Reset session counters for new test
+        resetSessionCounters();
+
         setTestConfig(config);
         setQuestions([]);
         setAnswers(new Array(config.questionCount).fill(null));

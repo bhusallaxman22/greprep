@@ -21,12 +21,14 @@ import {
   School,
   PersonAdd,
   Login as LoginIcon,
-  AccountCircle
-} from '@mui/icons-material';
+  AccountCircle,
+  Google as GoogleIcon,
+} from "@mui/icons-material";
 import { useAuth } from '../context/AuthContext';
 
 const AuthScreen = () => {
-  const { signUp, signIn, signInAsGuest, resetPassword } = useAuth();
+  const { signUp, signIn, signInAsGuest, signInWithGoogle, resetPassword } =
+    useAuth();
   const [activeTab, setActiveTab] = useState(0); // 0 = login, 1 = signup
   const [formData, setFormData] = useState({
     email: '',
@@ -160,17 +162,33 @@ const AuthScreen = () => {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      console.error("Google sign-in error:", err);
+      setError("Failed to sign in with Google. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Container maxWidth="sm" sx={{ mt: 8, mb: 4 }}>
       <Paper elevation={6} sx={{ p: 4, borderRadius: 2 }}>
         {/* Header */}
-        <Box sx={{ textAlign: 'center', mb: 4 }}>
+        <Box sx={{ textAlign: "center", mb: 4 }}>
           <School color="primary" sx={{ fontSize: 48, mb: 2 }} />
           <Typography variant="h4" component="h1" gutterBottom>
             GRE/GMAT Test Prep
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            {resetMode ? 'Reset your password' : 'Sign in to track your progress and improve your scores'}
+            {resetMode
+              ? "Reset your password"
+              : "Sign in to track your progress and improve your scores"}
           </Typography>
         </Box>
 
@@ -187,10 +205,10 @@ const AuthScreen = () => {
         )}
 
         {!resetMode && (
-          <Tabs 
-            value={activeTab} 
-            onChange={handleTabChange} 
-            centered 
+          <Tabs
+            value={activeTab}
+            onChange={handleTabChange}
+            centered
             sx={{ mb: 3 }}
           >
             <Tab icon={<LoginIcon />} label="Sign In" />
@@ -205,7 +223,7 @@ const AuthScreen = () => {
             label="Email Address"
             type="email"
             value={formData.email}
-            onChange={handleInputChange('email')}
+            onChange={handleInputChange("email")}
             margin="normal"
             required
             autoComplete="email"
@@ -218,7 +236,7 @@ const AuthScreen = () => {
               fullWidth
               label="Display Name"
               value={formData.displayName}
-              onChange={handleInputChange('displayName')}
+              onChange={handleInputChange("displayName")}
               margin="normal"
               required
             />
@@ -229,12 +247,14 @@ const AuthScreen = () => {
             <TextField
               fullWidth
               label="Password"
-              type={showPassword ? 'text' : 'password'}
+              type={showPassword ? "text" : "password"}
               value={formData.password}
-              onChange={handleInputChange('password')}
+              onChange={handleInputChange("password")}
               margin="normal"
               required
-              autoComplete={activeTab === 0 ? 'current-password' : 'new-password'}
+              autoComplete={
+                activeTab === 0 ? "current-password" : "new-password"
+              }
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
@@ -255,9 +275,9 @@ const AuthScreen = () => {
             <TextField
               fullWidth
               label="Confirm Password"
-              type={showConfirmPassword ? 'text' : 'password'}
+              type={showConfirmPassword ? "text" : "password"}
               value={formData.confirmPassword}
-              onChange={handleInputChange('confirmPassword')}
+              onChange={handleInputChange("confirmPassword")}
               margin="normal"
               required
               autoComplete="new-password"
@@ -265,7 +285,9 @@ const AuthScreen = () => {
                 endAdornment: (
                   <InputAdornment position="end">
                     <IconButton
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      onClick={() =>
+                        setShowConfirmPassword(!showConfirmPassword)
+                      }
                       edge="end"
                     >
                       {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
@@ -283,13 +305,25 @@ const AuthScreen = () => {
             variant="contained"
             sx={{ mt: 3, mb: 2, py: 1.5 }}
             disabled={loading}
-            startIcon={loading ? <CircularProgress size={20} /> : 
-                     resetMode ? <LoginIcon /> :
-                     activeTab === 0 ? <LoginIcon /> : <PersonAdd />}
+            startIcon={
+              loading ? (
+                <CircularProgress size={20} />
+              ) : resetMode ? (
+                <LoginIcon />
+              ) : activeTab === 0 ? (
+                <LoginIcon />
+              ) : (
+                <PersonAdd />
+              )
+            }
           >
-            {loading ? 'Please wait...' :
-             resetMode ? 'Send Reset Email' :
-             activeTab === 0 ? 'Sign In' : 'Create Account'}
+            {loading
+              ? "Please wait..."
+              : resetMode
+              ? "Send Reset Email"
+              : activeTab === 0
+              ? "Sign In"
+              : "Create Account"}
           </Button>
 
           {/* Additional Options */}
@@ -297,13 +331,13 @@ const AuthScreen = () => {
             <>
               {/* Forgot Password */}
               {activeTab === 0 && (
-                <Box sx={{ textAlign: 'center', mb: 2 }}>
+                <Box sx={{ textAlign: "center", mb: 2 }}>
                   <Link
                     component="button"
                     type="button"
                     variant="body2"
                     onClick={() => setResetMode(true)}
-                    sx={{ textDecoration: 'none' }}
+                    sx={{ textDecoration: "none" }}
                   >
                     Forgot your password?
                   </Link>
@@ -317,6 +351,27 @@ const AuthScreen = () => {
                 </Typography>
               </Divider>
 
+              {/* Google Sign-In */}
+              <Button
+                fullWidth
+                variant="outlined"
+                onClick={handleGoogleSignIn}
+                disabled={loading}
+                startIcon={<GoogleIcon />}
+                sx={{
+                  py: 1.5,
+                  mb: 2,
+                  borderColor: "#4285f4",
+                  color: "#4285f4",
+                  "&:hover": {
+                    borderColor: "#3367d6",
+                    backgroundColor: "rgba(66, 133, 244, 0.04)",
+                  },
+                }}
+              >
+                Continue with Google
+              </Button>
+
               {/* Guest Login */}
               <Button
                 fullWidth
@@ -329,22 +384,26 @@ const AuthScreen = () => {
                 Continue as Guest
               </Button>
 
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
-                Guest mode allows you to try the app without creating an account.
-                Your progress will not be saved.
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 2, textAlign: "center" }}
+              >
+                Guest mode allows you to try the app without creating an
+                account. Your progress will not be saved.
               </Typography>
             </>
           )}
 
           {/* Back from Reset Mode */}
           {resetMode && (
-            <Box sx={{ textAlign: 'center', mt: 2 }}>
+            <Box sx={{ textAlign: "center", mt: 2 }}>
               <Link
                 component="button"
                 type="button"
                 variant="body2"
                 onClick={() => setResetMode(false)}
-                sx={{ textDecoration: 'none' }}
+                sx={{ textDecoration: "none" }}
               >
                 Back to Sign In
               </Link>

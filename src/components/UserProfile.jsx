@@ -29,6 +29,8 @@ import {
   Save
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import { isFeatureEnabled } from "../constants/featureFlags";
+import UsageMonitor from "./molecules/UsageMonitor";
 
 const UserProfile = ({ open, onClose }) => {
   const { user, logout, updateUserProfile, updateUserPassword } = useAuth();
@@ -341,6 +343,28 @@ const UserProfile = ({ open, onClose }) => {
                 Update Password
               </Button>
             </Box>
+
+            {/* API Usage Statistics - Only show if rate limiting is enabled */}
+            {isFeatureEnabled("RATE_LIMITING", "enabled") &&
+              isFeatureEnabled("RATE_LIMITING", "showUsageStats") && (
+                <>
+                  <Divider sx={{ my: 3 }} />
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      API Usage Statistics
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ mb: 2 }}
+                    >
+                      Monitor your API usage to stay within rate limits and
+                      optimize your study sessions.
+                    </Typography>
+                    <UsageMonitor variant="full" />
+                  </Box>
+                </>
+              )}
           </Box>
         )}
       </DialogContent>

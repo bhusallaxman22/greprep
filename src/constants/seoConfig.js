@@ -1,7 +1,7 @@
 // SEO Configuration and Keywords
 export const SEO_CONFIG = {
     siteName: "GREPrep.AI",
-    siteUrl: "https://greprep.ai", // Replace with your actual domain
+    siteUrl: "https://greprep.academy", // Replace with your actual domain
     defaultImage: "/images/og-default.jpg",
     twitterHandle: "@GREPrepAI",
 };

@@ -191,9 +191,152 @@ class FirebaseService {
         return bookmarkedModules;
     }
 
+    async addBookmark(userId, moduleId) {
+        const docRef = doc(db, 'userBookmarks', userId);
+        const docSnap = await getDoc(docRef);
+
+        let bookmarkedModules = [];
+        if (docSnap.exists()) bookmarkedModules = docSnap.data().bookmarkedModules || [];
+
+        if (!bookmarkedModules.includes(moduleId)) {
+            bookmarkedModules.push(moduleId);
+            await setDoc(docRef, { userId, bookmarkedModules, lastUpdated: serverTimestamp() });
+        }
+        return bookmarkedModules;
+    }
+
+    async removeBookmark(userId, moduleId) {
+        const docRef = doc(db, 'userBookmarks', userId);
+        const docSnap = await getDoc(docRef);
+
+        let bookmarkedModules = [];
+        if (docSnap.exists()) bookmarkedModules = docSnap.data().bookmarkedModules || [];
+
+        bookmarkedModules = bookmarkedModules.filter((id) => id !== moduleId);
+        await setDoc(docRef, { userId, bookmarkedModules, lastUpdated: serverTimestamp() });
+        return bookmarkedModules;
+    }
+
+    async getBookmarkedModules(userId) {
+        const docRef = doc(db, 'userBookmarks', userId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+            return docSnap.data().bookmarkedModules || [];
+        }
+        return [];
+    }
+
     async saveLearningSession(userId, sessionData) {
         const docRef = await addDoc(collection(db, 'learningSessions'), { userId, ...sessionData, startTime: serverTimestamp(), timestamp: new Date().toISOString() });
         return docRef.id;
+    }
+
+    async completeModule(userId, moduleData) {
+        try {
+            // Save learning session for the completed module
+            await this.saveLearningSession(userId, {
+                moduleId: moduleData.id,
+                moduleName: moduleData.title,
+                xpEarned: moduleData.xpReward || 0,
+                accuracy: moduleData.accuracy || 0,
+                timeSpent: moduleData.duration || 0,
+                sessionType: 'module_completion',
+                completedAt: new Date().toISOString()
+            });
+
+            // Update user stats
+            const userStatsRef = doc(db, 'userStats', userId);
+            const userStatsDoc = await getDoc(userStatsRef);
+
+            let currentStats = {};
+            if (userStatsDoc.exists()) {
+                currentStats = userStatsDoc.data();
+            }
+
+            const completedModules = currentStats.completedModules || [];
+            if (!completedModules.includes(moduleData.id)) {
+                completedModules.push(moduleData.id);
+            }
+
+            const newTotalXP = (currentStats.totalXP || 0) + (moduleData.xpReward || 0);
+            const accuracy = moduleData.accuracy || 0;
+            const previousAccuracy = currentStats.accuracy || 0;
+            const newAccuracy = completedModules.length === 1
+                ? accuracy
+                : Math.round(((previousAccuracy * (completedModules.length - 1)) + accuracy) / completedModules.length);
+
+            // Update streak
+            const today = new Date().toDateString();
+            const lastActiveDate = currentStats.lastActiveDate;
+            let streakDays = currentStats.streakDays || 0;
+
+            if (lastActiveDate !== today) {
+                if (lastActiveDate) {
+                    const lastDate = new Date(lastActiveDate);
+                    const todayDate = new Date(today);
+                    const dayDifference = Math.floor((todayDate - lastDate) / (1000 * 60 * 60 * 24));
+
+                    if (dayDifference === 1) {
+                        streakDays += 1;
+                    } else if (dayDifference > 1) {
+                        streakDays = 1; // Reset streak but count today
+                    }
+                } else {
+                    streakDays = 1; // First day
+                }
+            }
+
+            const updatedStats = {
+                ...currentStats,
+                completedModules,
+                totalXP: newTotalXP,
+                accuracy: newAccuracy,
+                streakDays,
+                lastActiveDate: today,
+                modulesCompleted: completedModules.length,
+                lastModuleCompleted: moduleData.id,
+                lastCompletedAt: new Date().toISOString(),
+                lastUpdated: serverTimestamp()
+            };
+
+            await setDoc(userStatsRef, updatedStats);
+            return updatedStats;
+        } catch (error) {
+            console.error("Error completing module:", error);
+            throw error;
+        }
+    }
+
+    async getUserStats(userId) {
+        try {
+            const userStatsRef = doc(db, 'userStats', userId);
+            const userStatsDoc = await getDoc(userStatsRef);
+
+            if (userStatsDoc.exists()) {
+                return userStatsDoc.data();
+            } else {
+                // Return default stats for new users
+                return {
+                    completedModules: [],
+                    totalXP: 0,
+                    accuracy: 0,
+                    streakDays: 0,
+                    modulesCompleted: 0,
+                    lastActiveDate: null,
+                };
+            }
+        } catch (error) {
+            console.error("Error getting user stats:", error);
+            return {
+                completedModules: [],
+                totalXP: 0,
+                accuracy: 0,
+                streakDays: 0,
+                modulesCompleted: 0,
+                lastActiveDate: null,
+            };
+        }
     }
 
     async getUserAchievements(userId) {
@@ -203,8 +346,24 @@ class FirebaseService {
     }
 
     async awardAchievement(userId, achievementData) {
-        const docRef = await addDoc(collection(db, 'userAchievements'), { userId, ...achievementData, earnedAt: serverTimestamp(), timestamp: new Date().toISOString() });
-        return docRef.id;
+        // Check if achievement already exists
+        const q = query(
+            collection(db, 'userAchievements'),
+            where('userId', '==', userId),
+            where('badge', '==', achievementData.badge)
+        );
+        const existingAchievements = await getDocs(q);
+
+        if (existingAchievements.empty) {
+            const docRef = await addDoc(collection(db, 'userAchievements'), {
+                userId,
+                ...achievementData,
+                earnedAt: serverTimestamp(),
+                timestamp: new Date().toISOString()
+            });
+            return docRef.id;
+        }
+        return null; // Achievement already exists
     }
 }
 

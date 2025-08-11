@@ -21,6 +21,7 @@ import DifficultySelect from "./molecules/DifficultySelect";
 import QuestionCountSelect from "./molecules/QuestionCountSelect";
 import SummaryChips from "./molecules/SummaryChips";
 import LoadingButton from "./atoms/LoadingButton";
+import RateLimitAlert from "./atoms/RateLimitAlert";
 import useLoadingStates from "../hooks/useLoadingStates";
 
 function TestSelection({ onStartTest, onBack }) {

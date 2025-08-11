@@ -11,6 +11,17 @@ import {
   Snackbar,
   Menu,
   MenuItem,
+  IconButton,
+  useMediaQuery,
+  Drawer,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Avatar,
+  Chip,
+  CircularProgress,
 } from "@mui/material";
 import {
   School,
@@ -18,6 +29,8 @@ import {
   Info,
   Home,
   MenuBook,
+  Menu as MenuIcon,
+  Close as CloseIcon,
 } from "@mui/icons-material";
 
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -29,7 +42,11 @@ import LandingPage from "./components/LandingPage";
 import UserProfile from "./components/UserProfile";
 import ModuleLearning from "./components/ModuleLearning";
 import EnhancedLearning from "./components/EnhancedLearning";
+import StreamlinedLearning from "./components/pages/StreamlinedLearning";
+import StreamlinedModuleLearning from "./components/pages/StreamlinedModuleLearning";
 import About from "./components/About";
+import RateLimitAlert from "./components/atoms/RateLimitAlert";
+import { isFeatureEnabled } from "./constants/featureFlags";
 import APP_STATES from "./constants/appStates";
 import useMenu from "./hooks/useMenu";
 import useTestFlow from "./hooks/useTestFlow";
@@ -192,11 +209,16 @@ const theme = createTheme({
 });
 
 function AppContent() {
-  const { user, signOut } = useAuth();
+  const { user, loading, logout } = useAuth();
+
   const [appState, setAppState] = useState(APP_STATES.DASHBOARD);
   const { anchorEl, isOpen, openMenu, closeMenu } = useMenu();
   const [showProfile, setShowProfile] = useState(false);
   const [selectedModule, setSelectedModule] = useState(null);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  // Responsive design
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
   // Centralize test-taking flow in a hook
   const {
@@ -218,12 +240,29 @@ function AppContent() {
     clearError,
   } = useTestFlow(user);
 
+  // Show loading spinner while authentication state is loading
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+          bgcolor: "background.default",
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   const handleMenuClick = (event) => {
     openMenu(event);
   };
 
   const handleSignOut = () => {
-    signOut();
+    logout();
     closeMenu();
   };
 
@@ -269,20 +308,40 @@ function AppContent() {
       >
         {/* AppBar - Only show when user is logged in */}
         {user && (
-          <AppBar position="static" sx={{ bgcolor: "primary.main" }}>
-            <Toolbar>
-              <School sx={{ mr: 2 }} />
-              <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                GRE GMAT Test Prep
+          <AppBar
+            position="static"
+            elevation={0}
+            sx={{
+              bgcolor: "primary.main",
+              borderBottom: "1px solid",
+              borderColor: "primary.dark",
+            }}
+          >
+            <Toolbar sx={{ px: { xs: 1, sm: 2 } }}>
+              <School sx={{ mr: 2, color: "white" }} />
+              <Typography
+                variant="h6"
+                component="div"
+                sx={{
+                  flexGrow: 1,
+                  fontWeight: 600,
+                  fontSize: { xs: "1rem", sm: "1.25rem" },
+                }}
+              >
+                GRE GMAT Prep
               </Typography>
 
-              {user && (
-                <>
+              {/* Desktop Navigation */}
+              {!isMobile && (
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <Button
                     color="inherit"
                     startIcon={<Home />}
                     onClick={returnToDashboard}
-                    sx={{ mr: 1 }}
+                    sx={{
+                      textTransform: "none",
+                      "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
+                    }}
                   >
                     Dashboard
                   </Button>
@@ -290,7 +349,10 @@ function AppContent() {
                     color="inherit"
                     startIcon={<MenuBook />}
                     onClick={startLearning}
-                    sx={{ mr: 1 }}
+                    sx={{
+                      textTransform: "none",
+                      "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
+                    }}
                   >
                     Learning
                   </Button>
@@ -298,31 +360,171 @@ function AppContent() {
                     color="inherit"
                     startIcon={<Info />}
                     onClick={() => setAppState(APP_STATES.ABOUT)}
-                    sx={{ mr: 2 }}
+                    sx={{
+                      textTransform: "none",
+                      "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
+                    }}
                   >
                     About
                   </Button>
+
+                  {/* User Profile Button */}
                   <Button
                     color="inherit"
-                    startIcon={<AccountCircle />}
                     onClick={handleMenuClick}
-                    endIcon={
-                      <Typography variant="body2" sx={{ ml: 1 }}>
-                        {user.isAnonymous
-                          ? "Guest User"
-                          : user.displayName || user.email}
-                      </Typography>
+                    startIcon={
+                      <Avatar
+                        sx={{
+                          width: 32,
+                          height: 32,
+                          bgcolor: "secondary.main",
+                        }}
+                      >
+                        {user?.isAnonymous
+                          ? "G"
+                          : user?.displayName?.[0] || user?.email?.[0] || "U"}
+                      </Avatar>
                     }
+                    sx={{
+                      textTransform: "none",
+                      borderRadius: 3,
+                      px: 2,
+                      "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
+                    }}
                   >
-                    {user.isAnonymous
-                      ? "Guest User"
-                      : user.displayName || user.email}
+                    <Box sx={{ ml: 1, textAlign: "left" }}>
+                      <Typography variant="body2" sx={{ lineHeight: 1.2 }}>
+                        {user?.isAnonymous
+                          ? "Guest User"
+                          : user?.displayName || user?.email}
+                      </Typography>
+                      <Chip
+                        label={user?.isAnonymous ? "Guest" : "Member"}
+                        size="small"
+                        sx={{
+                          height: 16,
+                          fontSize: "0.6rem",
+                          color: "white",
+                          bgcolor: user?.isAnonymous
+                            ? "warning.main"
+                            : "success.main",
+                        }}
+                      />
+                    </Box>
                   </Button>
-                </>
+                </Box>
+              )}
+
+              {/* Mobile Navigation */}
+              {isMobile && (
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <IconButton
+                    color="inherit"
+                    onClick={handleMenuClick}
+                    sx={{ p: 1 }}
+                  >
+                    <Avatar
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        bgcolor: "secondary.main",
+                      }}
+                    >
+                      {user?.isAnonymous
+                        ? "G"
+                        : user?.displayName?.[0] || user?.email?.[0] || "U"}
+                    </Avatar>
+                  </IconButton>
+                  <IconButton
+                    color="inherit"
+                    onClick={() => setMobileDrawerOpen(true)}
+                    sx={{ p: 1 }}
+                  >
+                    <MenuIcon />
+                  </IconButton>
+                </Box>
               )}
             </Toolbar>
           </AppBar>
         )}
+
+        {/* Mobile Drawer */}
+        <Drawer
+          anchor="right"
+          open={mobileDrawerOpen}
+          onClose={() => setMobileDrawerOpen(false)}
+          sx={{
+            "& .MuiDrawer-paper": {
+              width: 280,
+              bgcolor: "background.paper",
+            },
+          }}
+        >
+          <Box sx={{ p: 2 }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 3,
+              }}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Navigation
+              </Typography>
+              <IconButton onClick={() => setMobileDrawerOpen(false)}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
+
+            <List>
+              <ListItem disablePadding>
+                <ListItemButton
+                  onClick={() => {
+                    returnToDashboard();
+                    setMobileDrawerOpen(false);
+                  }}
+                  sx={{ borderRadius: 2, mb: 1 }}
+                >
+                  <ListItemIcon>
+                    <Home />
+                  </ListItemIcon>
+                  <ListItemText primary="Dashboard" />
+                </ListItemButton>
+              </ListItem>
+
+              <ListItem disablePadding>
+                <ListItemButton
+                  onClick={() => {
+                    startLearning();
+                    setMobileDrawerOpen(false);
+                  }}
+                  sx={{ borderRadius: 2, mb: 1 }}
+                >
+                  <ListItemIcon>
+                    <MenuBook />
+                  </ListItemIcon>
+                  <ListItemText primary="Learning Modules" />
+                </ListItemButton>
+              </ListItem>
+
+              <ListItem disablePadding>
+                <ListItemButton
+                  onClick={() => {
+                    setAppState(APP_STATES.ABOUT);
+                    setMobileDrawerOpen(false);
+                  }}
+                  sx={{ borderRadius: 2, mb: 1 }}
+                >
+                  <ListItemIcon>
+                    <Info />
+                  </ListItemIcon>
+                  <ListItemText primary="About" />
+                </ListItemButton>
+              </ListItem>
+            </List>
+          </Box>
+        </Drawer>
 
         {/* User Menu */}
         <Menu
@@ -330,12 +532,58 @@ function AppContent() {
           open={isOpen}
           onClose={closeMenu}
           onClick={closeMenu}
+          transformOrigin={{ horizontal: "right", vertical: "top" }}
+          anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
+          sx={{
+            "& .MuiPaper-root": {
+              borderRadius: 2,
+              mt: 1,
+              minWidth: 200,
+              boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
+            },
+          }}
         >
-          <MenuItem onClick={() => setShowProfile(true)}>
-            <AccountCircle sx={{ mr: 1 }} />
-            Profile
+          <Box sx={{ p: 2, borderBottom: "1px solid", borderColor: "divider" }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+              <Avatar
+                sx={{
+                  width: 40,
+                  height: 40,
+                  bgcolor: "primary.main",
+                }}
+              >
+                {user?.isAnonymous
+                  ? "G"
+                  : user?.displayName?.[0] || user?.email?.[0] || "U"}
+              </Avatar>
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  {user?.isAnonymous
+                    ? "Guest User"
+                    : user?.displayName || user?.email}
+                </Typography>
+                <Chip
+                  label={user?.isAnonymous ? "Guest Account" : "Member"}
+                  size="small"
+                  color={user?.isAnonymous ? "warning" : "success"}
+                  variant="outlined"
+                />
+              </Box>
+            </Box>
+          </Box>
+
+          <MenuItem
+            onClick={() => setShowProfile(true)}
+            sx={{ py: 1.5, gap: 2 }}
+          >
+            <AccountCircle />
+            <Typography>View Profile</Typography>
           </MenuItem>
-          <MenuItem onClick={handleSignOut}>
+
+          <MenuItem
+            onClick={handleSignOut}
+            sx={{ py: 1.5, gap: 2, color: "error.main" }}
+          >
             <Typography>Sign Out</Typography>
           </MenuItem>
         </Menu>
@@ -419,13 +667,13 @@ function AppContent() {
                 </>
               )}
               {appState === APP_STATES.LEARNING && (
-                <EnhancedLearning
+                <StreamlinedLearning
                   onBack={returnToDashboard}
                   onStartModule={startModule}
                 />
               )}
               {appState === APP_STATES.MODULE_LEARNING && (
-                <ModuleLearning
+                <StreamlinedModuleLearning
                   module={selectedModule}
                   onBack={returnToLearning}
                 />
@@ -445,17 +693,37 @@ function AppContent() {
           />
         )}
 
-        {/* Error Snackbar */}
-        <Snackbar
-          open={!!error}
-          autoHideDuration={6000}
-          onClose={clearError}
-          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        >
-          <Alert onClose={clearError} severity="error" sx={{ width: "100%" }}>
-            {error}
-          </Alert>
-        </Snackbar>
+        {/* Error Handling */}
+        {error &&
+        error.includes("limit") &&
+        isFeatureEnabled("RATE_LIMITING", "enabled") ? (
+          <Box
+            sx={{
+              position: "fixed",
+              top: 80,
+              left: 16,
+              right: 16,
+              zIndex: 1300,
+            }}
+          >
+            <RateLimitAlert
+              error={error}
+              onDismiss={clearError}
+              severity="warning"
+            />
+          </Box>
+        ) : (
+          <Snackbar
+            open={!!error}
+            autoHideDuration={6000}
+            onClose={clearError}
+            anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+          >
+            <Alert onClose={clearError} severity="error" sx={{ width: "100%" }}>
+              {error}
+            </Alert>
+          </Snackbar>
+        )}
       </Box>
     </ThemeProvider>
   );

@@ -1,22 +1,24 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth } from '../firebase';
-import { 
-  onAuthStateChanged, 
+import React, { createContext, useContext, useEffect, useState } from "react";
+import { auth } from "../firebase";
+import {
+  onAuthStateChanged,
   signInAnonymously,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
   updateProfile,
-  updatePassword
-} from 'firebase/auth';
+  updatePassword,
+  GoogleAuthProvider,
+  signInWithPopup,
+} from "firebase/auth";
 
 const AuthContext = createContext();
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error("useAuth must be used within AuthProvider");
   }
   return context;
 };
@@ -39,20 +41,24 @@ export const AuthProvider = ({ children }) => {
       const result = await signInAnonymously(auth);
       return result.user;
     } catch (error) {
-      console.error('Error signing in as guest:', error);
+      console.error("Error signing in as guest:", error);
       throw error;
     }
   };
 
   const signUp = async (email, password, displayName) => {
     try {
-      const result = await createUserWithEmailAndPassword(auth, email, password);
+      const result = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
       if (displayName) {
         await updateProfile(result.user, { displayName });
       }
       return result.user;
     } catch (error) {
-      console.error('Error signing up:', error);
+      console.error("Error signing up:", error);
       throw error;
     }
   };
@@ -62,7 +68,18 @@ export const AuthProvider = ({ children }) => {
       const result = await signInWithEmailAndPassword(auth, email, password);
       return result.user;
     } catch (error) {
-      console.error('Error signing in:', error);
+      console.error("Error signing in:", error);
+      throw error;
+    }
+  };
+
+  const signInWithGoogle = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      return result.user;
+    } catch (error) {
+      console.error("Error signing in with Google:", error);
       throw error;
     }
   };
@@ -71,7 +88,7 @@ export const AuthProvider = ({ children }) => {
     try {
       await signOut(auth);
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error("Error signing out:", error);
       throw error;
     }
   };
@@ -80,7 +97,7 @@ export const AuthProvider = ({ children }) => {
     try {
       await sendPasswordResetEmail(auth, email);
     } catch (error) {
-      console.error('Error sending password reset email:', error);
+      console.error("Error sending password reset email:", error);
       throw error;
     }
   };
@@ -89,7 +106,7 @@ export const AuthProvider = ({ children }) => {
     try {
       await updatePassword(auth.currentUser, newPassword);
     } catch (error) {
-      console.error('Error updating password:', error);
+      console.error("Error updating password:", error);
       throw error;
     }
   };
@@ -98,7 +115,7 @@ export const AuthProvider = ({ children }) => {
     try {
       await updateProfile(auth.currentUser, updates);
     } catch (error) {
-      console.error('Error updating profile:', error);
+      console.error("Error updating profile:", error);
       throw error;
     }
   };
@@ -109,10 +126,11 @@ export const AuthProvider = ({ children }) => {
     signInAsGuest,
     signUp,
     signIn,
+    signInWithGoogle,
     logout,
     resetPassword,
     updateUserPassword,
-    updateUserProfile
+    updateUserProfile,
   };
 
   return (
