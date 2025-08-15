@@ -31,7 +31,7 @@ import LoadingSpinner from "../atoms/LoadingSpinner";
 import DifficultyBadge from "../atoms/DifficultyBadge";
 import openRouterService from "../../services/openrouter";
 import firebaseService from "../../services/firebase";
-import { useAuth } from "../../context/AuthContext";
+import useAuth from "../../context/useAuth";
 
 /**
  * Streamlined module learning experience

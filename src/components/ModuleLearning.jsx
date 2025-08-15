@@ -27,7 +27,7 @@ import {
   Star,
   TrendingUp,
 } from "@mui/icons-material";
-import { useAuth } from "../context/AuthContext";
+import useAuth from "../context/useAuth";
 import openRouterService from "../services/openrouter";
 import userProgressService from "../services/userProgress";
 

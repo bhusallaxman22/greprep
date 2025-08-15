@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { auth } from "../firebase";
 import {
   onAuthStateChanged,
@@ -12,16 +12,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
 } from "firebase/auth";
-
-const AuthContext = createContext();
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
-  return context;
-};
+import { AuthContext } from "./AuthContextBase";
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -36,7 +27,7 @@ export const AuthProvider = ({ children }) => {
     return unsubscribe;
   }, []);
 
-  const signInAsGuest = async () => {
+  const signInAsGuest = React.useCallback(async () => {
     try {
       const result = await signInAnonymously(auth);
       return result.user;
@@ -44,9 +35,9 @@ export const AuthProvider = ({ children }) => {
       console.error("Error signing in as guest:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const signUp = async (email, password, displayName) => {
+  const signUp = React.useCallback(async (email, password, displayName) => {
     try {
       const result = await createUserWithEmailAndPassword(
         auth,
@@ -61,9 +52,9 @@ export const AuthProvider = ({ children }) => {
       console.error("Error signing up:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const signIn = async (email, password) => {
+  const signIn = React.useCallback(async (email, password) => {
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       return result.user;
@@ -71,9 +62,9 @@ export const AuthProvider = ({ children }) => {
       console.error("Error signing in:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = React.useCallback(async () => {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
@@ -82,56 +73,70 @@ export const AuthProvider = ({ children }) => {
       console.error("Error signing in with Google:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = React.useCallback(async () => {
     try {
       await signOut(auth);
     } catch (error) {
       console.error("Error signing out:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const resetPassword = async (email) => {
+  const resetPassword = React.useCallback(async (email) => {
     try {
       await sendPasswordResetEmail(auth, email);
     } catch (error) {
       console.error("Error sending password reset email:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const updateUserPassword = async (newPassword) => {
+  const updateUserPassword = React.useCallback(async (newPassword) => {
     try {
       await updatePassword(auth.currentUser, newPassword);
     } catch (error) {
       console.error("Error updating password:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const updateUserProfile = async (updates) => {
+  const updateUserProfile = React.useCallback(async (updates) => {
     try {
       await updateProfile(auth.currentUser, updates);
     } catch (error) {
       console.error("Error updating profile:", error);
       throw error;
     }
-  };
+  }, []);
 
-  const value = {
-    user,
-    loading,
-    signInAsGuest,
-    signUp,
-    signIn,
-    signInWithGoogle,
-    logout,
-    resetPassword,
-    updateUserPassword,
-    updateUserProfile,
-  };
+  const value = React.useMemo(
+    () => ({
+      user,
+      loading,
+      signInAsGuest,
+      signUp,
+      signIn,
+      signInWithGoogle,
+      logout,
+      resetPassword,
+      updateUserPassword,
+      updateUserProfile,
+    }),
+    [
+      user,
+      loading,
+      signInAsGuest,
+      signUp,
+      signIn,
+      signInWithGoogle,
+      logout,
+      resetPassword,
+      updateUserPassword,
+      updateUserProfile,
+    ]
+  );
 
   return (
     <AuthContext.Provider value={value}>

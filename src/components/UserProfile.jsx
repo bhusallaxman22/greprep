@@ -28,7 +28,7 @@ import {
   ExitToApp,
   Save
 } from '@mui/icons-material';
-import { useAuth } from '../context/AuthContext';
+import useAuth from "../context/useAuth";
 import { isFeatureEnabled } from "../constants/featureFlags";
 import UsageMonitor from "./molecules/UsageMonitor";
 

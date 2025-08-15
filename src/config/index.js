@@ -3,7 +3,7 @@ export const OPENROUTER = {
     apiKey: import.meta.env.VITE_OPENROUTER_API_KEY,
     baseUrl: import.meta.env.VITE_OPENROUTER_BASE_URL,
     appTitle: 'GRE/GMAT Test Prep App',
-    maxRetries: 3,
+    maxRetries: 5,
     baseDelayMs: 1000,
 };
 

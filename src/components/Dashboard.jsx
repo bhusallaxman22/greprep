@@ -35,7 +35,7 @@ import {
   PieChart,
   History,
 } from "@mui/icons-material";
-import { useAuth } from "../context/AuthContext";
+import useAuth from "../context/useAuth";
 import AIInsights from "./AIInsights";
 import {
   BarChart,

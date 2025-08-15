@@ -33,17 +33,16 @@ import {
   Close as CloseIcon,
 } from "@mui/icons-material";
 
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { AuthProvider } from "./context/AuthContext";
+import useAuth from "./context/useAuth";
 import Dashboard from "./components/Dashboard";
 import TestSelection from "./components/TestSelection";
 import QuestionDisplay from "./components/QuestionDisplay";
 import TestResults from "./components/TestResults";
 import LandingPage from "./components/LandingPage";
 import UserProfile from "./components/UserProfile";
-import ModuleLearning from "./components/ModuleLearning";
-import EnhancedLearning from "./components/EnhancedLearning";
 import StreamlinedLearning from "./components/pages/StreamlinedLearning";
-import StreamlinedModuleLearning from "./components/pages/StreamlinedModuleLearning";
+import InteractiveLearningExperience from "./components/InteractiveLearningExperience";
 import About from "./components/About";
 import RateLimitAlert from "./components/atoms/RateLimitAlert";
 import { isFeatureEnabled } from "./constants/featureFlags";
@@ -223,11 +222,11 @@ function AppContent() {
   // Centralize test-taking flow in a hook
   const {
     testConfig,
-    questions,
+    answers,
     currentQuestionIndex,
     currentQuestion,
-    currentAnswer,
     isLoadingQuestion,
+    isStartingTest,
     testResult,
     startTest,
     handleAnswer,
@@ -280,8 +279,14 @@ function AppContent() {
   };
 
   const startTestAndGo = async (config) => {
-    await startTest(config);
-    setAppState(APP_STATES.TEST_IN_PROGRESS);
+    try {
+      await startTest(config);
+      // Only change state after the test is fully loaded
+      setAppState(APP_STATES.TEST_IN_PROGRESS);
+    } catch (error) {
+      console.error("Failed to start test:", error);
+      // Handle error appropriately, maybe show an error message
+    }
   };
 
   const handleFinishAndGo = async () => {
@@ -624,6 +629,7 @@ function AppContent() {
                   <TestSelection
                     onStartTest={startTestAndGo}
                     onBack={returnToDashboard}
+                    currentAppState={appState}
                   />
                 </>
               )}
@@ -644,9 +650,14 @@ function AppContent() {
                     onNext={nextQuestion}
                     onPrevious={previousQuestion}
                     onFinish={handleFinishAndGo}
-                    selectedAnswer={currentAnswer?.answerIndex}
-                    isLoading={isLoadingQuestion}
-                    questionsArray={questions}
+                    currentQuestionIndex={currentQuestionIndex}
+                    testConfig={testConfig}
+                    testComplete={false}
+                    userAnswers={answers}
+                    isLoadingQuestion={isLoadingQuestion || isStartingTest}
+                    isStartingTest={isStartingTest}
+                    questionTimeLimit={testConfig?.questionTimeLimit || 0}
+                    examTimeLimit={testConfig?.examTimeLimit || 0}
                   />
                 </>
               )}
@@ -673,9 +684,10 @@ function AppContent() {
                 />
               )}
               {appState === APP_STATES.MODULE_LEARNING && (
-                <StreamlinedModuleLearning
+                <InteractiveLearningExperience
                   module={selectedModule}
                   onBack={returnToLearning}
+                  onComplete={returnToLearning}
                 />
               )}
               {appState === APP_STATES.ABOUT && (

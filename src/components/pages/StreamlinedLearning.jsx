@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import {
   Container,
   Grid,
@@ -20,13 +26,17 @@ import {
 } from "@mui/icons-material";
 import PropTypes from "prop-types";
 
-import { useAuth } from "../../context/AuthContext";
+import useAuth from "../../context/useAuth";
 import firebaseService from "../../services/firebase";
 import LoadingSpinner from "../atoms/LoadingSpinner";
 import LearningDashboard from "../organisms/LearningDashboard";
 import LearningFilters from "../molecules/LearningFilters";
 import LearningModuleCard from "../molecules/LearningModuleCard";
 import AchievementPanel from "../organisms/AchievementPanel";
+import {
+  getRequiredLevelForDifficulty,
+  coerceLevel,
+} from "../../constants/moduleUnlocks";
 
 /**
  * Streamlined learning page with improved UX and organization
@@ -41,6 +51,7 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
   const [userStats, setUserStats] = useState({});
   const [userProgress, setUserProgress] = useState({});
   const [bookmarkedModules, setBookmarkedModules] = useState([]);
+  const baseModulesRef = useRef([]);
 
   // Filter state
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -90,6 +101,7 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
 
   // Generate learning modules
   const generateModules = useCallback(() => {
+    // Return static base catalog (no unlock computation here)
     return [
       // 🎯 VERBAL REASONING PATH
       {
@@ -420,7 +432,35 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
     ];
   }, []);
 
-  // Helper function to calculate average score
+  const applyUnlockLogic = useCallback((catalog, stats, progress) => {
+    const level = coerceLevel(stats.level || 1);
+    const completedSet = new Set(
+      Object.entries(progress)
+        .filter(([, v]) => v.completed)
+        .map(([id]) => id)
+    );
+    const diffRankMap = {
+      beginner: 1,
+      intermediate: 2,
+      advanced: 3,
+      expert: 4,
+    };
+    const enriched = catalog.map((m) => {
+      const diffRank = diffRankMap[m.difficulty] || 1;
+      const requiredLevel = getRequiredLevelForDifficulty(diffRank);
+      const prereqOk =
+        !m.prerequisites?.length ||
+        m.prerequisites.every((p) => completedSet.has(p));
+      // Soft unlock: only level gate; prerequisites become recommendations
+      const unlocked = level >= requiredLevel;
+      const pendingPrereqs = (m.prerequisites || []).filter(
+        (p) => !completedSet.has(p)
+      );
+      return { ...m, unlocked, requiredLevel, prereqOk, pendingPrereqs };
+    });
+    return enriched;
+  }, []);
+
   // Load data
   useEffect(() => {
     const loadData = async () => {
@@ -428,8 +468,7 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
         setLoading(true);
         setError(null);
 
-        const generatedModules = generateModules();
-
+        // Fetch base remote data once
         const [stats, moduleScores, bookmarks] = await Promise.all([
           firebaseService.getUserStats(user.uid).catch(() => ({
             completedModules: [],
@@ -442,19 +481,17 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
           firebaseService.getBookmarkedModules(user.uid).catch(() => []),
         ]);
 
-        // Transform data for the UI
         const transformedStats = {
-          level: Math.floor(stats.totalXP / 500) + 1,
+          level: Math.floor((stats.totalXP || 0) / 500) + 1,
           currentXP: stats.totalXP || 0,
-          nextLevelXP: (Math.floor(stats.totalXP / 500) + 1) * 500,
+          nextLevelXP: (Math.floor((stats.totalXP || 0) / 500) + 1) * 500,
           streak: stats.streakDays || 0,
           completedModules: stats.modulesCompleted || 0,
-          totalModules: generatedModules.length,
+          totalModules: baseModulesRef.current.length || 0,
           averageScore: stats.accuracy || 0,
-          ...stats, // Include all original stats for achievement panel
+          ...stats,
         };
 
-        // Transform module scores to progress format
         const transformedProgress = {};
         Object.entries(moduleScores).forEach(([moduleId, scoreData]) => {
           transformedProgress[moduleId] = {
@@ -463,10 +500,22 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
           };
         });
 
-        setModules(generatedModules);
+        // Initialize base catalog only once
+        if (baseModulesRef.current.length === 0) {
+          baseModulesRef.current = generateModules();
+        }
+
         setUserStats(transformedStats);
         setUserProgress(transformedProgress);
         setBookmarkedModules(bookmarks);
+
+        // Initial unlock computation
+        const enriched = applyUnlockLogic(
+          baseModulesRef.current,
+          transformedStats,
+          transformedProgress
+        );
+        setModules(enriched);
       } catch (err) {
         console.error("Error loading learning data:", err);
         setError("Failed to load learning modules. Please try again.");
@@ -478,31 +527,29 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
     if (user?.uid) {
       loadData();
     }
-  }, [user?.uid, generateModules]);
+  }, [user?.uid, generateModules, applyUnlockLogic]);
+
+  // Recompute unlocks when level/progress changes (without refetching)
+  useEffect(() => {
+    if (!baseModulesRef.current.length) return;
+    setModules(
+      applyUnlockLogic(baseModulesRef.current, userStats, userProgress)
+    );
+  }, [userStats, userProgress, applyUnlockLogic]);
 
   // Get recommendation score for sorting
   const getRecommendationScore = useCallback(
     (module) => {
       let score = 0;
-
-      // Prioritize modules with no prerequisites or completed prerequisites
       const prerequisitesMet =
         module.prerequisites?.every(
           (prereq) => userProgress[prereq]?.completed
         ) ?? true;
-
       if (prerequisitesMet) score += 100;
-
-      // Boost modules with some progress
       const progress = userProgress[module.id]?.completion || 0;
       if (progress > 0 && progress < 100) score += 50;
-
-      // Boost bookmarked modules
       if (bookmarkedModules.includes(module.id)) score += 30;
-
-      // Slight preference for beginner modules
       if (module.difficulty === "beginner") score += 10;
-
       return score;
     },
     [userProgress, bookmarkedModules]
@@ -510,7 +557,7 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
 
   // Filter and sort modules
   const filteredModules = useMemo(() => {
-    let filtered = modules;
+    let filtered = modules.slice();
 
     // Category filter
     if (selectedCategory !== "all") {
@@ -536,6 +583,8 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
 
     // Sort modules
     filtered.sort((a, b) => {
+      // Always show unlocked before locked
+      if (a.unlocked !== b.unlocked) return a.unlocked ? -1 : 1;
       switch (sortBy) {
         case "title":
           return a.title.localeCompare(b.title);
@@ -557,7 +606,6 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
         }
         case "recommended":
         default: {
-          // Custom recommendation logic
           const scoreA = getRecommendationScore(a);
           const scoreB = getRecommendationScore(b);
           return scoreB - scoreA;
@@ -588,16 +636,9 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
   }, [categories, modules]);
 
   // Check if module is locked
-  const isModuleLocked = useCallback(
-    (module) => {
-      return (
-        module.prerequisites?.some(
-          (prereq) => !userProgress[prereq]?.completed
-        ) ?? false
-      );
-    },
-    [userProgress]
-  );
+  const isModuleLocked = useCallback((module) => {
+    return !module.unlocked; // only level-based
+  }, []);
 
   // Handle module start
   const handleStartModule = (module) => {
@@ -610,7 +651,6 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
   const handleToggleBookmark = async (moduleId) => {
     try {
       const isBookmarked = bookmarkedModules.includes(moduleId);
-
       if (isBookmarked) {
         await firebaseService.removeBookmark(user.uid, moduleId);
         setBookmarkedModules((prev) => prev.filter((id) => id !== moduleId));
@@ -722,6 +762,14 @@ const StreamlinedLearning = ({ onBack, onStartModule }) => {
                   onStart={handleStartModule}
                   onToggleBookmark={handleToggleBookmark}
                 />
+                {module.unlocked && module.pendingPrereqs?.length > 0 && (
+                  <Box
+                    sx={{ mt: 1, fontSize: "0.7rem", color: "warning.main" }}
+                  >
+                    Suggested to complete first:{" "}
+                    {module.pendingPrereqs.join(", ")}
+                  </Box>
+                )}
               </Grid>
             ))}
           </Grid>

@@ -40,9 +40,13 @@ import {
   ArrowBack,
   Search
 } from '@mui/icons-material';
-import { useAuth } from '../context/AuthContext';
-import firebaseService from '../services/firebase';
-import openRouterService from '../services/openrouter';
+import useAuth from "../context/useAuth";
+import firebaseService from "../services/firebase";
+import openRouterService from "../services/openrouter";
+import {
+  getRequiredLevelForDifficulty,
+  coerceLevel,
+} from "../constants/moduleUnlocks";
 
 const LearningModule = ({ onBack }) => {
   const { user } = useAuth();
@@ -51,20 +55,38 @@ const LearningModule = ({ onBack }) => {
     xp: 0,
     streak: 0,
     completedLessons: 0,
-    achievements: []
+    achievements: [],
   });
   const [learningPath, setLearningPath] = useState([]);
   const [currentLesson, setCurrentLesson] = useState(null);
   const [lessonDialog, setLessonDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lessonLoading, setLessonLoading] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Unlock modules reactively when user level increases
+  useEffect(() => {
+    setLearningPath((prev) => {
+      const level = coerceLevel(userProgress.level);
+      return prev.map((m) => {
+        if (!m) return m;
+        const requiredLevel = getRequiredLevelForDifficulty(m.difficulty);
+        const unlocked = level >= requiredLevel;
+        if (m.unlocked !== unlocked) {
+          console.debug(
+            `Unlock check: module=${m.id} diff=${m.difficulty} required=${requiredLevel} userLevel=${level} -> ${unlocked}`
+          );
+        }
+        return unlocked === m.unlocked ? m : { ...m, unlocked };
+      });
+    });
+  }, [userProgress.level]);
 
   const loadLearningData = useCallback(async () => {
     try {
       setLoading(true);
-      
+
       // Load user progress from Firebase
       const progress = await firebaseService.getUserLearningProgress(user.uid);
       setUserProgress(progress);
@@ -75,17 +97,17 @@ const LearningModule = ({ onBack }) => {
       const path = await generateLearningPath(weakAreas, progress.level);
       setLearningPath(path);
     } catch (error) {
-      console.error('Error loading learning data:', error);
+      console.error("Error loading learning data:", error);
     } finally {
       setLoading(false);
     }
   }, [user?.uid]);
 
   const analyzeWeakAreas = (testResults) => {
-    if (!testResults.length) return ['vocabulary', 'reading-comprehension'];
-    
+    if (!testResults.length) return ["vocabulary", "reading-comprehension"];
+
     const sectionPerformance = {};
-    testResults.forEach(result => {
+    testResults.forEach((result) => {
       if (!sectionPerformance[result.section]) {
         sectionPerformance[result.section] = { correct: 0, total: 0 };
       }
@@ -102,7 +124,9 @@ const LearningModule = ({ onBack }) => {
       }
     });
 
-    return weakAreas.length ? weakAreas : ['vocabulary', 'reading-comprehension'];
+    return weakAreas.length
+      ? weakAreas
+      : ["vocabulary", "reading-comprehension"];
   };
 
   const generateLearningPath = async (weakAreas, currentLevel) => {
@@ -1223,15 +1247,19 @@ const LearningModule = ({ onBack }) => {
       },
     ];
 
-    // Prioritize modules based on weak areas
-    return modules.sort((a, b) => {
+    // Apply centralized unlock rules (override any hardcoded unlocked flags)
+    const level = coerceLevel(currentLevel);
+    const withUnlocks = modules.map((m) => ({
+      ...m,
+      unlocked: level >= getRequiredLevelForDifficulty(m.difficulty),
+    }));
+    return withUnlocks.sort((a, b) => {
       const aIsWeak = weakAreas.some(
         (area) => a.category.includes(area) || a.id.includes(area)
       );
       const bIsWeak = weakAreas.some(
         (area) => b.category.includes(area) || b.id.includes(area)
       );
-
       if (aIsWeak && !bIsWeak) return -1;
       if (!aIsWeak && bIsWeak) return 1;
       return a.difficulty - b.difficulty;

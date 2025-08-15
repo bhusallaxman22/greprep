@@ -24,7 +24,7 @@ import {
   AccountCircle,
   Google as GoogleIcon,
 } from "@mui/icons-material";
-import { useAuth } from '../context/AuthContext';
+import useAuth from "../context/useAuth";
 
 const AuthScreen = () => {
   const { signUp, signIn, signInAsGuest, signInWithGoogle, resetPassword } =

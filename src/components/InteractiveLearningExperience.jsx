@@ -33,6 +33,10 @@ import {
   ListItemText,
   CircularProgress,
   Skeleton,
+  Fade,
+  Slide,
+  Zoom,
+  Grow,
 } from "@mui/material";
 import {
   PlayArrow,
@@ -62,8 +66,7 @@ import {
   ExpandMore,
   ExpandLess,
 } from "@mui/icons-material";
-import { Fade, Slide, Zoom, Grow } from "@mui/material";
-import { useAuth } from "../context/AuthContext";
+import useAuth from "../context/useAuth";
 import firebaseService from "../services/firebase";
 import openRouterService from "../services/openrouter";
 
@@ -93,6 +96,7 @@ const InteractiveLearningExperience = ({ module, onComplete, onBack }) => {
 
   // Timer
   const [timeElapsed, setTimeElapsed] = useState(0);
+  const [questionTime, setQuestionTime] = useState(0);
 
   // Configuration constants
   const LEARNING_STEPS = [
@@ -114,20 +118,118 @@ const InteractiveLearningExperience = ({ module, onComplete, onBack }) => {
     },
   ];
 
-  // Initialize learning experience
+  // Helper to decide if passage should be included
+  const shouldIncludePassage = useCallback((m) => {
+    if (!m) return false;
+    const id = m.id || "";
+    const cat = m.category || "";
+    if (["verbal", "integrated", "analytical"].includes(cat)) return true;
+    return /reading|comprehension|graphics|data|analysis|interpretation/i.test(
+      id
+    );
+  }, []);
+
+  // Normalizer to enforce consistent shape
+  const normalizeQuestion = useCallback((q, index) => {
+    const opts = Array.isArray(q.options)
+      ? q.options.slice(0, 6)
+      : Array.isArray(q.choices)
+      ? q.choices.slice(0, 6)
+      : ["Option A", "Option B", "Option C", "Option D"];
+    return {
+      id: q.id || `q${index + 1}`,
+      type:
+        q.type ||
+        (index < 0.3 * 10
+          ? "concept"
+          : index < 0.7 * 10
+          ? "guided"
+          : index < 0.9 * 10
+          ? "independent"
+          : "mastery"),
+      question: q.question || q.prompt || q.text || `Question ${index + 1}`,
+      options: opts.length >= 2 ? opts : [...opts, "Option X"],
+      correctAnswer: Number.isInteger(q.correctAnswer) ? q.correctAnswer : 0,
+      explanation: q.explanation || q.rationale || "Explanation not available.",
+      hint: q.hint || q.clue || "Think about the underlying concept.",
+      difficulty: q.difficulty || q.level || 2,
+      concepts: Array.isArray(q.concepts)
+        ? q.concepts
+        : q.concepts
+        ? [String(q.concepts)]
+        : [],
+      learningObjective:
+        q.learningObjective || q.objective || "Master key concepts",
+      passage: q.passage || q.context || null,
+      images: Array.isArray(q.images) ? q.images : q.image ? [q.image] : [],
+    };
+  }, []);
+
+  // Generate Rich Learning Content (uses service with robust fallbacks) - moved above initializeLearningExperience to avoid TDZ error
+  const generateLearningContent = useCallback(
+    async (module) => {
+      const baseCount = Number.isFinite(module?.totalQuestions)
+        ? module.totalQuestions
+        : Number.isFinite(module?.lessons)
+        ? module.lessons
+        : 10;
+      const questionCount = Math.max(1, Math.min(50, baseCount));
+      const difficultyStr =
+        typeof module?.difficulty === "number"
+          ? module.difficulty <= 1
+            ? "easy"
+            : module.difficulty <= 2
+            ? "medium"
+            : "hard"
+          : module?.difficulty || "medium";
+      const includePassage = shouldIncludePassage(module);
+      try {
+        const questions = await openRouterService.generateLearningQuestions({
+          topic: module.title,
+          category: module.category,
+          difficulty: difficultyStr,
+          questionCount,
+          includePassage,
+          includeImages: includePassage,
+          moduleMeta: {
+            description: module.description,
+            prerequisites: module.prerequisites,
+            badges: module.badges,
+            duration: module.duration,
+            xpReward: module.xpReward,
+          },
+        });
+        const arr = Array.isArray(questions) ? questions : [];
+        return arr.map((q, i) => normalizeQuestion(q, i));
+      } catch (err) {
+        console.warn("Falling back to local question generator:", err?.message);
+        return generateFallbackQuestions(module, questionCount).questions.map(
+          (q, i) => normalizeQuestion(q, i)
+        );
+      }
+    },
+    [normalizeQuestion, shouldIncludePassage]
+  );
+
+  // Initialize learning experience (placed after generateLearningContent)
   const initializeLearningExperience = useCallback(async () => {
     try {
       setLoading(true);
 
       // Generate comprehensive learning content
       const learningContent = await generateLearningContent(module);
-      setQuestions(learningContent.questions);
+      const generated = Array.isArray(learningContent)
+        ? learningContent
+        : learningContent?.questions || [];
+      setQuestions(generated);
       setSessionData((prev) => ({
         ...prev,
-        totalQuestions: learningContent.questions.length,
+        totalQuestions: generated.length,
       }));
-    } catch {
-      console.error("Error initializing learning experience");
+    } catch (e) {
+      console.error("Error initializing learning experience", e);
+      setQuestions([]);
+      setSessionData((prev) => ({ ...prev, totalQuestions: 0 }));
     } finally {
       setLoading(false);
     }
@@ -146,64 +248,26 @@ const InteractiveLearningExperience = ({ module, onComplete, onBack }) => {
     return () => clearInterval(timer);
   }, [module, initializeLearningExperience]);
 
-  // Generate Rich Learning Content
-  const generateLearningContent = useCallback(async (module) => {
-    const prompt = `Create a comprehensive learning experience for the module "${module.title}" in ${module.category}.
+  // Per-question timer: reset on question change, pause during explanation/loading
+  useEffect(() => {
+    setQuestionTime(0);
+    if (loading || showExplanation) return;
+    const qTimer = setInterval(() => setQuestionTime((s) => s + 1), 1000);
+    return () => clearInterval(qTimer);
+  }, [currentQuestionIndex, showExplanation, loading]);
 
-    Generate exactly ${module.totalQuestions} progressive questions with the following structure:
-    1. Concept introduction questions (30%)
-    2. Guided practice questions (40%) 
-    3. Independent practice questions (20%)
-    4. Mastery assessment questions (10%)
-
-    For each question, provide:
-    - Question text that builds on previous concepts
-    - 4 multiple choice options (A, B, C, D)
-    - Correct answer
-    - Detailed explanation with learning insights
-    - Helpful hint for struggling learners
-    - Related concepts to explore further
-
-    Make the content engaging, progressive, and focused on deep understanding rather than memorization.
-    
-    Return as JSON with this structure:
-    {
-      "questions": [
-        {
-          "id": 1,
-          "question": "...",
-          "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
-          "correctAnswer": "A",
-          "explanation": "...",
-          "hint": "...",
-          "concepts": ["concept1", "concept2"],
-          "difficulty": "easy|medium|hard",
-          "category": "${module.category}"
-        }
-      ]
-    }`;
-
-    try {
-      const response = await openRouterService.generateContent(prompt);
-      // Parse the response and structure it properly
-      return JSON.parse(response);
-    } catch {
-      // Fallback to sample questions
-      return generateFallbackQuestions(module);
-    }
-  }, []);
-
-  const generateFallbackQuestions = (module) => {
+  const generateFallbackQuestions = (module, count = 10) => {
+    const total = Math.max(1, count || 10);
     const baseQuestions = [];
-    for (let i = 0; i < module.totalQuestions; i++) {
+    for (let i = 0; i < total; i++) {
       baseQuestions.push({
         id: `q${i + 1}`,
         type:
-          i < module.totalQuestions * 0.3
+          i < total * 0.3
             ? "concept"
-            : i < module.totalQuestions * 0.7
+            : i < total * 0.7
             ? "guided"
-            : i < module.totalQuestions * 0.9
+            : i < total * 0.9
             ? "independent"
             : "mastery",
         question: `Sample ${module.category} question ${i + 1} for ${
@@ -243,12 +307,17 @@ const InteractiveLearningExperience = ({ module, onComplete, onBack }) => {
     const userAnswer = userAnswers[currentQuestionIndex];
     const isCorrect = userAnswer === currentQuestion.correctAnswer;
 
-    // Update session data
+    // Update session data (guard concepts array)
     setSessionData((prev) => ({
       ...prev,
       correctAnswers: isCorrect ? prev.correctAnswers + 1 : prev.correctAnswers,
       conceptsLearned: [
-        ...new Set([...prev.conceptsLearned, ...currentQuestion.concepts]),
+        ...new Set([
+          ...prev.conceptsLearned,
+          ...(Array.isArray(currentQuestion.concepts)
+            ? currentQuestion.concepts
+            : []),
+        ]),
       ],
     }));
 
@@ -407,6 +476,12 @@ const InteractiveLearningExperience = ({ module, onComplete, onBack }) => {
                 variant="outlined"
               />
               <Chip
+                icon={<Speed />}
+                label={formatTime(questionTime)}
+                color="success"
+                variant="outlined"
+              />
+              <Chip
                 icon={<QuestionAnswer />}
                 label={`${currentQuestionIndex + 1}/${questions.length}`}
                 color="secondary"
@@ -484,6 +559,55 @@ const InteractiveLearningExperience = ({ module, onComplete, onBack }) => {
       {currentQuestion && (
         <Slide direction="left" in timeout={800}>
           <Paper elevation={3} sx={{ p: 4, borderRadius: 3, mb: 3 }}>
+            {/* Passage (if any) */}
+            {currentQuestion.passage && (
+              <Box
+                sx={{
+                  mb: 3,
+                  p: 2,
+                  borderLeft: "4px solid",
+                  borderColor: "primary.main",
+                  backgroundColor: "primary.light",
+                  borderRadius: 1,
+                  opacity: 0.9,
+                }}
+              >
+                <Typography
+                  variant="subtitle2"
+                  sx={{ fontWeight: "bold", mb: 1 }}
+                >
+                  Passage
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}
+                >
+                  {currentQuestion.passage}
+                </Typography>
+              </Box>
+            )}
+            {/* Images (if any) */}
+            {Array.isArray(currentQuestion.images) &&
+              currentQuestion.images.length > 0 && (
+                <Box sx={{ mb: 3, display: "flex", flexWrap: "wrap", gap: 2 }}>
+                  {currentQuestion.images.map((src, i) => (
+                    <Box
+                      key={i}
+                      component="img"
+                      src={src}
+                      alt={`Illustration ${i + 1}`}
+                      sx={{
+                        maxWidth: "200px",
+                        borderRadius: 2,
+                        boxShadow: 2,
+                        border: "1px solid",
+                        borderColor: "divider",
+                      }}
+                    />
+                  ))}
+                </Box>
+              )}
+
             {/* Question Header */}
             <Box
               sx={{
@@ -716,25 +840,26 @@ const InteractiveLearningExperience = ({ module, onComplete, onBack }) => {
             </Typography>
 
             {/* Related Concepts */}
-            {currentQuestion.concepts && (
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="h6" sx={{ fontWeight: "bold", mb: 2 }}>
-                  Related Concepts:
-                </Typography>
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                  {currentQuestion.concepts.map((concept, index) => (
-                    <Chip
-                      key={index}
-                      label={concept}
-                      icon={<Psychology />}
-                      color="primary"
-                      variant="outlined"
-                      size="small"
-                    />
-                  ))}
+            {Array.isArray(currentQuestion.concepts) &&
+              currentQuestion.concepts.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: "bold", mb: 2 }}>
+                    Related Concepts:
+                  </Typography>
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                    {currentQuestion.concepts.map((concept, index) => (
+                      <Chip
+                        key={index}
+                        label={concept}
+                        icon={<Psychology />}
+                        color="primary"
+                        variant="outlined"
+                        size="small"
+                      />
+                    ))}
+                  </Box>
                 </Box>
-              </Box>
-            )}
+              )}
 
             {/* Learning Objective */}
             <Alert severity="info" icon={<School />}>

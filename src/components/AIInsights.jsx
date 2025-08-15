@@ -61,6 +61,60 @@ const AIInsights = ({ insights, isLoading = false }) => {
     return colors[severity] || "info";
   };
 
+  // Normalize legacy shapes (arrays) to current object shape
+  const normalizeSection = (section) => {
+    if (!section) return null;
+    if (Array.isArray(section)) {
+      // Take first item or join array depending on expected usage
+      const first = section[0];
+      if (typeof first === "string") {
+        return {
+          title: "Insights",
+          content: section.join("\n"),
+          icon: "lightbulb",
+          severity: "info",
+        };
+      }
+      if (typeof first === "object") return first; // assume already structured
+    }
+    return section; // already object
+  };
+
+  const normalized = insights
+    ? {
+        keyInsights:
+          normalizeSection(insights.keyInsights) ||
+          normalizeSection(insights.insights) ||
+          normalizeSection(insights.keyInsight),
+        priorityActions:
+          normalizeSection(insights.priorityActions) ||
+          normalizeSection(insights.actions),
+        studyPlan:
+          normalizeSection(insights.studyPlan) ||
+          (Array.isArray(insights.studyPlanItems)
+            ? {
+                title: "Study Plan",
+                items: insights.studyPlanItems,
+                icon: "book",
+                severity: "info",
+              }
+            : null),
+        testStrategy:
+          normalizeSection(insights.testStrategy) ||
+          normalizeSection(insights.strategy),
+        motivation:
+          normalizeSection(insights.motivation) ||
+          normalizeSection(insights.encouragement),
+        stats: insights.stats,
+        error: insights.error,
+      }
+    : null;
+
+  // Derive simple fallback text if rich sections missing
+  const simpleText =
+    !normalized?.keyInsights && typeof insights === "string" ? insights : null;
+
+  // Show placeholder if nothing meaningful
   if (isLoading) {
     return (
       <Box sx={{ py: 4 }}>
@@ -73,7 +127,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
           AI Performance Analysis
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", py: 3 }}>
-          <Box sx={{ mr: 2 }}>
+          <Box sx={{ mr: 2, flex: 1 }}>
             <LinearProgress />
           </Box>
           <Typography color="text.secondary">
@@ -84,18 +138,50 @@ const AIInsights = ({ insights, isLoading = false }) => {
     );
   }
 
-  if (!insights || insights.error) {
+  if (!normalized) {
+    return (
+      <Box sx={{ py: 4, textAlign: "center" }}>
+        <Psychology sx={{ fontSize: 48, color: "text.disabled", mb: 2 }} />
+        <Typography variant="h6" color="text.secondary">
+          AI insights will appear here once enough performance data is
+          available.
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (normalized?.error) {
     return (
       <Alert severity="error" sx={{ my: 2 }}>
-        {insights?.error || "AI insights could not be generated at this time."}
+        {normalized.error || "AI insights could not be generated at this time."}
       </Alert>
+    );
+  }
+
+  if (simpleText) {
+    return (
+      <Paper sx={{ p: 3 }}>
+        <Typography
+          variant="h6"
+          sx={{ display: "flex", alignItems: "center", mb: 2 }}
+        >
+          <Psychology sx={{ mr: 1 }} />
+          AI Insights
+        </Typography>
+        <Typography
+          variant="body1"
+          sx={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}
+        >
+          {simpleText}
+        </Typography>
+      </Paper>
     );
   }
 
   return (
     <Box>
       {/* Header with Stats */}
-      {insights.stats && (
+      {normalized?.stats && (
         <Fade in timeout={800}>
           <Paper
             elevation={3}
@@ -124,7 +210,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
               <Grid item xs={6} sm={3}>
                 <Card variant="outlined" sx={{ textAlign: "center", p: 2 }}>
                   <Typography variant="h4" color="primary">
-                    {insights.stats.overallScore}%
+                    {normalized.stats.overallScore}%
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Overall Score
@@ -134,7 +220,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
               <Grid item xs={6} sm={3}>
                 <Card variant="outlined" sx={{ textAlign: "center", p: 2 }}>
                   <Typography variant="h6" color="success.main">
-                    {insights.stats.strongestSection}
+                    {normalized.stats.strongestSection}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Strongest Section
@@ -144,7 +230,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
               <Grid item xs={6} sm={3}>
                 <Card variant="outlined" sx={{ textAlign: "center", p: 2 }}>
                   <Typography variant="h6" color="error.main">
-                    {insights.stats.weakestSection}
+                    {normalized.stats.weakestSection}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Needs Improvement
@@ -154,13 +240,25 @@ const AIInsights = ({ insights, isLoading = false }) => {
               <Grid item xs={6} sm={3}>
                 <Card variant="outlined" sx={{ textAlign: "center", p: 2 }}>
                   <Typography variant="h6" color="info.main">
-                    {insights.stats.testsCompleted}
+                    {normalized.stats.testsCompleted}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Tests Completed
                   </Typography>
                 </Card>
               </Grid>
+              {typeof normalized.stats.averageQuestionTime === "number" && (
+                <Grid item xs={12} sm={3}>
+                  <Card variant="outlined" sx={{ textAlign: "center", p: 2 }}>
+                    <Typography variant="h6" color="secondary.main">
+                      {Math.round(normalized.stats.averageQuestionTime)}s
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Avg Time/Q
+                    </Typography>
+                  </Card>
+                </Grid>
+              )}
             </Grid>
           </Paper>
         </Fade>
@@ -169,7 +267,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
       {/* Insights Grid */}
       <Grid container spacing={3}>
         {/* Key Insights */}
-        {insights.keyInsights && (
+        {normalized.keyInsights && (
           <Grid item xs={12} md={6}>
             <Slide direction="right" in timeout={1000}>
               <Paper
@@ -185,18 +283,18 @@ const AIInsights = ({ insights, isLoading = false }) => {
                 }}
               >
                 <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-                  {getIcon(insights.keyInsights.icon)}
+                  {getIcon(normalized.keyInsights.icon)}
                   <Typography variant="h6" sx={{ ml: 1, fontWeight: "bold" }}>
-                    {insights.keyInsights.title}
+                    {normalized.keyInsights.title}
                   </Typography>
                 </Box>
                 <Alert
-                  severity={getSeverityColor(insights.keyInsights.severity)}
+                  severity={getSeverityColor(normalized.keyInsights.severity)}
                   sx={{ border: "none", backgroundColor: "transparent", p: 0 }}
                   icon={false}
                 >
                   <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
-                    {insights.keyInsights.content}
+                    {normalized.keyInsights.content}
                   </Typography>
                 </Alert>
               </Paper>
@@ -205,7 +303,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
         )}
 
         {/* Priority Actions */}
-        {insights.priorityActions && (
+        {normalized.priorityActions && (
           <Grid item xs={12} md={6}>
             <Slide direction="left" in timeout={1200}>
               <Paper
@@ -221,9 +319,9 @@ const AIInsights = ({ insights, isLoading = false }) => {
                 }}
               >
                 <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-                  {getIcon(insights.priorityActions.icon)}
+                  {getIcon(normalized.priorityActions.icon)}
                   <Typography variant="h6" sx={{ ml: 1, fontWeight: "bold" }}>
-                    {insights.priorityActions.title}
+                    {normalized.priorityActions.title}
                   </Typography>
                   <Chip
                     label="High Priority"
@@ -233,14 +331,16 @@ const AIInsights = ({ insights, isLoading = false }) => {
                   />
                 </Box>
                 <Alert
-                  severity={getSeverityColor(insights.priorityActions.severity)}
+                  severity={getSeverityColor(
+                    normalized.priorityActions.severity
+                  )}
                   sx={{
                     backgroundColor: `${theme.palette.warning.light}10`,
                     border: `1px solid ${theme.palette.warning.light}`,
                   }}
                 >
                   <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
-                    {insights.priorityActions.content}
+                    {normalized.priorityActions.content}
                   </Typography>
                 </Alert>
               </Paper>
@@ -249,7 +349,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
         )}
 
         {/* Study Plan */}
-        {insights.studyPlan && (
+        {normalized.studyPlan && (
           <Grid item xs={12} md={6}>
             <Grow in timeout={1400}>
               <Paper
@@ -265,22 +365,29 @@ const AIInsights = ({ insights, isLoading = false }) => {
                 }}
               >
                 <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-                  {getIcon(insights.studyPlan.icon)}
+                  {getIcon(normalized.studyPlan.icon)}
                   <Typography variant="h6" sx={{ ml: 1, fontWeight: "bold" }}>
-                    {insights.studyPlan.title}
+                    {normalized.studyPlan.title}
                   </Typography>
                 </Box>
                 <List dense sx={{ py: 0 }}>
-                  {insights.studyPlan.items?.map((item, index) => (
-                    <ListItem key={index} sx={{ px: 0 }}>
+                  {normalized.studyPlan.items?.map((item) => (
+                    <ListItem
+                      key={
+                        typeof item === "string" ? item : JSON.stringify(item)
+                      }
+                      sx={{ px: 0 }}
+                    >
                       <ListItemIcon sx={{ minWidth: 32 }}>
                         <CheckCircle color="success" sx={{ fontSize: 20 }} />
                       </ListItemIcon>
                       <ListItemText
                         primary={item}
-                        primaryTypographyProps={{
-                          variant: "body2",
-                          sx: { lineHeight: 1.4 },
+                        sx={{
+                          "& .MuiListItemText-primary": {
+                            fontSize: "0.875rem",
+                            lineHeight: 1.4,
+                          },
                         }}
                       />
                     </ListItem>
@@ -292,7 +399,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
         )}
 
         {/* Test Strategy */}
-        {insights.testStrategy && (
+        {normalized.testStrategy && (
           <Grid item xs={12} md={6}>
             <Grow in timeout={1600}>
               <Paper
@@ -308,9 +415,9 @@ const AIInsights = ({ insights, isLoading = false }) => {
                 }}
               >
                 <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-                  {getIcon(insights.testStrategy.icon)}
+                  {getIcon(normalized.testStrategy.icon)}
                   <Typography variant="h6" sx={{ ml: 1, fontWeight: "bold" }}>
-                    {insights.testStrategy.title}
+                    {normalized.testStrategy.title}
                   </Typography>
                 </Box>
                 <Box
@@ -322,7 +429,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
                   }}
                 >
                   <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
-                    {insights.testStrategy.content}
+                    {normalized.testStrategy.content}
                   </Typography>
                 </Box>
               </Paper>
@@ -331,7 +438,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
         )}
 
         {/* Motivation */}
-        {insights.motivation && (
+        {normalized.motivation && (
           <Grid item xs={12}>
             <Fade in timeout={1800}>
               <Paper
@@ -348,9 +455,9 @@ const AIInsights = ({ insights, isLoading = false }) => {
                 }}
               >
                 <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-                  {getIcon(insights.motivation.icon)}
+                  {getIcon(normalized.motivation.icon)}
                   <Typography variant="h6" sx={{ ml: 1, fontWeight: "bold" }}>
-                    {insights.motivation.title}
+                    {normalized.motivation.title}
                   </Typography>
                   <EmojiEvents
                     sx={{ ml: "auto", color: "success.main", fontSize: 28 }}
@@ -374,7 +481,7 @@ const AIInsights = ({ insights, isLoading = false }) => {
                       fontSize: "1.1rem",
                     }}
                   >
-                    {insights.motivation.content}
+                    {normalized.motivation.content}
                   </Typography>
                 </Alert>
               </Paper>
@@ -388,52 +495,58 @@ const AIInsights = ({ insights, isLoading = false }) => {
 
 AIInsights.propTypes = {
   insights: PropTypes.shape({
-    keyInsights: PropTypes.arrayOf(
-      PropTypes.shape({
-        id: PropTypes.string,
-        title: PropTypes.string,
-        content: PropTypes.string,
-        icon: PropTypes.string,
-        severity: PropTypes.string,
-      })
-    ),
-    priorityActions: PropTypes.arrayOf(
-      PropTypes.shape({
-        id: PropTypes.string,
-        title: PropTypes.string,
-        content: PropTypes.string,
-        icon: PropTypes.string,
-        severity: PropTypes.string,
-      })
-    ),
-    studyPlan: PropTypes.arrayOf(
-      PropTypes.shape({
-        id: PropTypes.string,
-        title: PropTypes.string,
-        content: PropTypes.string,
-        icon: PropTypes.string,
-        severity: PropTypes.string,
-      })
-    ),
-    testStrategy: PropTypes.arrayOf(
-      PropTypes.shape({
-        id: PropTypes.string,
-        title: PropTypes.string,
-        content: PropTypes.string,
-        icon: PropTypes.string,
-        severity: PropTypes.string,
-      })
-    ),
-    motivation: PropTypes.shape({
-      title: PropTypes.string,
-      content: PropTypes.string,
-      icon: PropTypes.string,
-    }),
-    stats: PropTypes.shape({
-      overallGrade: PropTypes.string,
-      improvement: PropTypes.string,
-      focusAreas: PropTypes.arrayOf(PropTypes.string),
-    }),
+    keyInsights: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    insights: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    keyInsight: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    priorityActions: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    actions: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    studyPlan: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    studyPlanItems: PropTypes.array,
+    testStrategy: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    strategy: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    motivation: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    encouragement: PropTypes.oneOfType([
+      PropTypes.array,
+      PropTypes.object,
+      PropTypes.string,
+    ]),
+    stats: PropTypes.object,
     error: PropTypes.string,
   }),
   isLoading: PropTypes.bool,

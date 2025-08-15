@@ -9,6 +9,7 @@ import {
   Zoom,
   useMediaQuery,
   useTheme,
+  Typography,
 } from "@mui/material";
 import PropTypes from "prop-types";
 
@@ -31,11 +32,14 @@ import QuestionLayout from "../molecules/QuestionLayout";
 
 // Atoms
 import EmptyState from "../atoms/EmptyState";
+import LoadingSpinner from "../atoms/LoadingSpinner";
+import Timer from "../atoms/Timer";
 
 // Hooks
 import useQuestionState from "../../hooks/useQuestionState";
 import useQuestionNavigation from "../../hooks/useQuestionNavigation";
 import useLoadingStates from "../../hooks/useLoadingStates";
+import useTimer from "../../hooks/useTimer";
 
 const QuestionPage = (props) => {
   const {
@@ -62,27 +66,79 @@ const QuestionPage = (props) => {
     onRetakeTest,
     onReviewAnswers,
     userAnswers = {},
+    isLoadingQuestion = false,
+    isStartingTest = false,
+    questionTimeLimit = 0, // in seconds, 0 means no limit
+    examTimeLimit = 0, // in seconds, 0 means no limit
+    onQuestionTimeUp,
+    onExamTimeUp,
   } = props;
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const [showNavigation, setShowNavigation] = useState(false);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
+  const [questionStartTime, setQuestionStartTime] = useState(Date.now());
+
+  // Timer hooks
+  const questionTimer = useTimer(questionTimeLimit, {
+    autoStart: questionTimeLimit > 0,
+    onTimeUp: () => {
+      onQuestionTimeUp?.();
+      // Auto-advance to next question if time runs out
+      if (!isLastQuestion) {
+        handleNextWithLoading();
+      } else {
+        handleFinishWithLoading(localAnswers);
+      }
+    },
+  });
+
+  const examTimer = useTimer(examTimeLimit, {
+    autoStart: examTimeLimit > 0,
+    onTimeUp: () => {
+      onExamTimeUp?.();
+      // Auto-finish exam when time runs out
+      handleFinishWithLoading(localAnswers);
+    },
+  });
 
   // Loading states hook
   const { loadingStates, withLoading } = useLoadingStates();
 
   // Enhanced handlers with loading states
   const handleNextWithLoading = withLoading("nextQuestion", async () => {
+    // Calculate time spent on this question
+    const timeSpent = Math.floor((Date.now() - questionStartTime) / 1000);
+
     // Simulate async operation (API call, validation, etc.)
     await new Promise((resolve) => setTimeout(resolve, 800));
-    handleNextQuestion();
+
+    // Reset question timer for next question
+    if (questionTimeLimit > 0) {
+      // Use restart to force immediate countdown from full duration
+      if (questionTimer.restart) {
+        questionTimer.restart();
+      } else {
+        questionTimer.reset(true);
+      }
+    }
+    setQuestionStartTime(Date.now());
+
+    handleNextQuestion(timeSpent);
   });
 
   const handleFinishWithLoading = withLoading("finishTest", async (answers) => {
+    // Calculate time spent on final question
+    const timeSpent = Math.floor((Date.now() - questionStartTime) / 1000);
+
+    // Pause timers
+    questionTimer.pause();
+    examTimer.pause();
+
     // Simulate async operation (submitting test, validation, etc.)
     await new Promise((resolve) => setTimeout(resolve, 1200));
-    handleFinishTest(answers);
+    handleFinishTest(answers, timeSpent);
   });
 
   const handleReturnToDashboardWithLoading = withLoading(
@@ -152,10 +208,34 @@ const QuestionPage = (props) => {
   const currentSelectedValue = getCurrentSelectedValue();
 
   // Early returns for different states
-  if (!question) {
+  if (
+    !question ||
+    isLoadingQuestion ||
+    loadingStates.nextQuestion ||
+    isStartingTest
+  ) {
     return (
       <QuestionPageTemplate maxWidth="md">
-        <EmptyState message="Question not available" sx={{ mt: 4 }} />
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: "60vh",
+            gap: 2,
+          }}
+        >
+          <LoadingSpinner size={60} />
+          <Typography variant="h6" color="text.secondary">
+            {(() => {
+              if (isStartingTest) return "Starting exam...";
+              if (isLoadingQuestion || loadingStates.nextQuestion)
+                return "Loading question...";
+              return "Question not available";
+            })()}
+          </Typography>
+        </Box>
       </QuestionPageTemplate>
     );
   }
@@ -198,6 +278,66 @@ const QuestionPage = (props) => {
                   onToggleFlag={() => onToggleFlag?.(actualQuestionIndex)}
                   onOpenNavigator={() => setShowNavigation(true)}
                 />
+
+                {/* Timer Display */}
+                {(questionTimeLimit > 0 || examTimeLimit > 0) && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      mt: 2,
+                      mb: 1,
+                      p: 2,
+                      backgroundColor: "background.paper",
+                      borderRadius: 2,
+                      border: 1,
+                      borderColor: "divider",
+                    }}
+                  >
+                    {questionTimeLimit > 0 && (
+                      <Box
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
+                        <Typography variant="body2" color="text.secondary">
+                          Question Time:
+                        </Typography>
+                        <Timer
+                          duration={questionTimer.timeRemaining}
+                          variant="chip"
+                          color={
+                            questionTimer.isDanger
+                              ? "error"
+                              : questionTimer.isWarning
+                              ? "warning"
+                              : "primary"
+                          }
+                        />
+                      </Box>
+                    )}
+
+                    {examTimeLimit > 0 && (
+                      <Box
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
+                        <Typography variant="body2" color="text.secondary">
+                          Exam Time:
+                        </Typography>
+                        <Timer
+                          duration={examTimer.timeRemaining}
+                          variant="chip"
+                          color={
+                            examTimer.isDanger
+                              ? "error"
+                              : examTimer.isWarning
+                              ? "warning"
+                              : "secondary"
+                          }
+                        />
+                      </Box>
+                    )}
+                  </Box>
+                )}
               </Box>
             </Slide>
 
@@ -234,6 +374,8 @@ const QuestionPage = (props) => {
                       }
                       questionText={question.question}
                       chipColor={question.passage ? "secondary" : "primary"}
+                      image={question.image}
+                      imageDescription={question.imageDescription}
                     />
                   }
                   isMobile={isMobile}
@@ -330,6 +472,11 @@ QuestionPage.propTypes = {
   onRetakeTest: PropTypes.func,
   onReviewAnswers: PropTypes.func,
   userAnswers: PropTypes.object,
+  isLoadingQuestion: PropTypes.bool,
+  questionTimeLimit: PropTypes.number,
+  examTimeLimit: PropTypes.number,
+  onQuestionTimeUp: PropTypes.func,
+  onExamTimeUp: PropTypes.func,
 };
 
 export default QuestionPage;

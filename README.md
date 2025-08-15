@@ -140,6 +140,51 @@ npm run dev
 
 The app will be available at `http://localhost:5173`
 
+## 🔧 Troubleshooting
+
+### OpenRouter API Issues
+
+If you're seeing 404 errors or JSON parsing failures with OpenRouter:
+
+#### 1. Check Configuration
+```bash
+# Make sure your .env file has:
+VITE_OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
+VITE_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+```
+
+#### 2. Test Your Connection
+Run this in your browser console:
+```javascript
+// Test if OpenRouter is working
+testOpenRouterConnection();
+```
+
+#### 3. Common Error Solutions
+
+**"404 Not Found"**
+- Verify your API key is correct and has credits
+- Ensure base URL is `https://openrouter.ai/api/v1`
+- Check [OpenRouter.ai](https://openrouter.ai) for service status
+
+**"JSON parsing failed"**
+- App will automatically fall back to predefined questions
+- This is a temporary issue that self-resolves
+- Check console for specific parsing errors
+
+**"API key not configured"**
+- Copy `.env.example` to `.env`
+- Add your actual OpenRouter API key  
+- Restart the development server (`npm run dev`)
+
+### Quick Fix
+If OpenRouter issues persist, the app includes high-quality fallback questions and will continue working normally while you resolve the API configuration.
+
+### Getting Help
+- 📖 See `OPENROUTER_TROUBLESHOOTING.md` for detailed solutions
+- 🔍 Check browser console for specific error messages
+- ⚡ The app includes diagnostic tools to test your setup
+
 ## Building for Production
 
 ```bash

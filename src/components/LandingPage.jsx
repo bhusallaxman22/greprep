@@ -28,7 +28,7 @@ import {
   Insights,
   Close,
 } from "@mui/icons-material";
-import { useAuth } from "../context/AuthContext";
+import useAuth from "../context/useAuth";
 import AuthScreen from "./AuthScreen";
 
 const LandingPage = () => {
